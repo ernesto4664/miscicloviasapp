@@ -1,0 +1,93 @@
+/* ===== Mapa a pantalla completa ===== */
+.map-full {
+  position: absolute;
+  inset: 0;
+  .map-el {
+    position: absolute;
+    inset: 0;
+  }
+}
+
+/* ===== HUD superpuesto (tiempo, métricas, acciones) ===== */
+:host {
+  --safe-bottom: env(safe-area-inset-bottom, 12px);
+}
+
+.hud {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--safe-bottom) + 8px);
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  z-index: 10000;            /* 👈 por encima del mapa */
+  pointer-events: none;   /* deja arrastrar el mapa salvo en botones */
+}
+
+/* Píldora de tiempo */
+.hud .time {
+  background: rgba(0, 0, 0, .50);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  pointer-events: auto;
+}
+
+/* Bloques de métricas */
+.hud .stats {
+  display: flex;
+  gap: 10px;
+}
+.hud .stat {
+  background: rgba(0, 0, 0, .50);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: center;
+  pointer-events: auto;
+  b { display: block; font-size: 18px; }
+  small { font-size: 12px; opacity: .9; }
+}
+
+/* Acciones (siempre clicables) */
+.hud .actions {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;   /* 👈 deja hacer click */
+}
+.hud .actions .row { display: flex; gap: 8px; }
+
+/* FAB de centrar por encima del mapa y del HUD */
+ion-fab {
+  z-index: 21;
+}
+
+/* Flecha de usuario con estados */
+.user-arrow .arrow {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2l6 20-6-4-6 4 6-20z"/></svg>') no-repeat center/contain;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2l6 20-6-4-6 4 6-20z"/></svg>') no-repeat center/contain;
+}
+.user-arrow .arrow.recording { background: #2dd36f; }
+.user-arrow .arrow.paused    { background: #ffc409; }
+
+/* Sube la atribución de Leaflet para que no tape los botones */
+.leaflet-control-attribution {
+  margin-bottom: calc(var(--safe-bottom) + 56px);
+}
+
+/* Evita que el modal haga scroll; todo es overlay */
+ion-content {
+  --overflow: hidden;
+}
+
+.activity-alert {
+  .alert-head, .alert-message { text-align: left; }
+  .alert-message { white-space: pre-line; line-height: 1.35; }
+  .alert-button-group { gap: 8px; }
+}

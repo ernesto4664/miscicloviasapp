@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- =======================
+       PERMISOS
+       ======================= -->
+  <!-- Internet (tiles OSM, API propia, etc.) -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Estado de red (opcional para detectar sin conexión) -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+  <!-- Ubicación en primer plano -->
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
+  <!-- Ubicación en segundo plano (para tracking con la app en background) -->
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+  <!-- Servicios en primer plano (tracking continuo) -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <!-- Android 14+ exige declarar categoría específica -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+  <!-- Notificaciones (Android 13+) si muestras notificación persistente del tracking -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+  <application
+    android:allowBackup="true"
+    android:icon="@mipmap/ic_launcher"
+    android:label="@string/app_name"
+    android:roundIcon="@mipmap/ic_launcher_round"
+    android:supportsRtl="true"
+    android:theme="@style/AppTheme"
+    android:usesCleartextTraffic="true">
+
+    <!-- Habilita HTTP para entornos de desarrollo.
+         Si tu backend ya es HTTPS, puedes quitar usesCleartextTraffic o ponerlo en false. -->
+
+    <activity
+      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+      android:name=".MainActivity"
+      android:label="@string/title_activity_main"
+      android:theme="@style/AppTheme.NoActionBarLaunch"
+      android:launchMode="singleTask"
+      android:exported="true">
+
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+
+    <provider
+      android:name="androidx.core.content.FileProvider"
+      android:authorities="${applicationId}.fileprovider"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_paths" />
+    </provider>
+
+    <!-- Si usas Google Maps (no necesario para Leaflet/OSM):
+    <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="@string/google_maps_key" />
+    -->
+  </application>
+</manifest>

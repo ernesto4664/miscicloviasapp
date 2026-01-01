@@ -1,0 +1,34 @@
+<ion-content class="auth-gradient" fullscreen>
+  <div class="auth-card">
+    <ion-title class="auth-title">Crea tu cuenta</ion-title>
+
+    <ion-list lines="none" class="ion-margin-top">
+      <ion-item class="auth-input">
+        <ion-label position="stacked" color="light">Email</ion-label>
+        <ion-input type="email" [(ngModel)]="email" placeholder="tu@email.com"></ion-input>
+      </ion-item>
+
+      <ion-item class="auth-input ion-margin-top">
+        <ion-label position="stacked" color="light">Contraseña</ion-label>
+        <ion-input type="password" [(ngModel)]="password" placeholder="Mínimo 8 caracteres"></ion-input>
+      </ion-item>
+    </ion-list>
+
+    <ion-button expand="block" class="btn-primary ion-margin-top" (click)="submit()" [disabled]="loading">
+      {{ loading ? 'Creando...' : 'Crear cuenta' }}
+    </ion-button>
+
+    <div class="divider ion-margin-top">o</div>
+
+    <ion-button expand="block" class="btn-google" (click)="signUpWithGoogle()" [disabled]="loading">
+      <ion-icon name="logo-google" slot="start"></ion-icon>
+      Registrarse con Google
+    </ion-button>
+
+    <div class="ion-text-center">
+      <a class="btn-link" routerLink="/login">¿Ya tienes cuenta? Inicia sesión</a>
+    </div>
+
+    <div *ngIf="error" class="ion-text-center ion-margin-top" style="color:#fecaca">{{ error }}</div>
+  </div>
+</ion-content>

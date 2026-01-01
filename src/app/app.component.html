@@ -1,0 +1,115 @@
+<ion-app>
+  <ion-split-pane when="false" contentId="main">
+    <ion-menu
+      side="start"
+      swipeGesture="true"
+      contentId="main"
+      menuId="main-menu"
+      type="overlay">
+      <ion-header>
+        <ion-toolbar color="primary">
+          <ion-title>MisCiclovías</ion-title>
+        </ion-toolbar>
+      </ion-header>
+
+      <ion-content>
+        <ion-list class="menu-list" lines="full">
+          <!-- Público -->
+          <ion-menu-toggle auto-hide="true">
+            <ion-item class="menu-item" routerLink="/tabs/home" routerDirection="root">
+              <ion-icon slot="start" name="home-outline"></ion-icon>
+              <ion-label>Inicio</ion-label>
+            </ion-item>
+          </ion-menu-toggle>
+
+          <ion-menu-toggle auto-hide="true">
+            <ion-item class="menu-item" routerLink="/tabs/exploracion" routerDirection="root">
+              <ion-icon slot="start" name="compass-outline"></ion-icon>
+              <ion-label>Exploración</ion-label>
+            </ion-item>
+          </ion-menu-toggle>
+
+          <ion-menu-toggle auto-hide="true">
+            <ion-item class="menu-item" routerLink="/noticias" routerDirection="root">
+              <ion-icon slot="start" name="newspaper-outline"></ion-icon>
+              <ion-label>Noticias</ion-label>
+            </ion-item>
+          </ion-menu-toggle>
+
+          <!-- Privado -->
+          <ng-container *ngIf="isAuth">
+            <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/tabs/registrar" routerDirection="root">
+                <ion-icon slot="start" name="create-outline"></ion-icon>
+                <ion-label>Registrar recorrido</ion-label>
+              </ion-item>
+            </ion-menu-toggle>
+
+            <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/tabs/planificacion" routerDirection="root">
+                <ion-icon slot="start" name="calendar-outline"></ion-icon>
+                <ion-label>Planificación</ion-label>
+              </ion-item>
+            </ion-menu-toggle>
+          </ng-container>
+
+          <!-- Admin -->
+          <ng-container *ngIf="isAdmin">
+            <ion-item class="menu-section" lines="none">
+              <ion-label>Administración</ion-label>
+            </ion-item>
+
+           <!-- <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/admin/users" routerDirection="root">
+                <ion-icon slot="start" name="people-outline"></ion-icon>
+                <ion-label>Gestión de usuarios</ion-label>
+              </ion-item>
+            </ion-menu-toggle>-->
+
+            <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/admin/calles-avenidas" routerDirection="root">
+                <ion-icon slot="start" name="layers-outline"></ion-icon>
+                <ion-label>Gestión calles/avenidas</ion-label>
+              </ion-item>
+            </ion-menu-toggle>
+
+            <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/admin/ciclovias" routerDirection="root">
+                <ion-icon slot="start" name="bicycle-outline"></ion-icon>
+                <ion-label>Gestión ciclovías</ion-label>
+              </ion-item>
+            </ion-menu-toggle>
+
+            <ion-menu-toggle auto-hide="true">
+              <ion-item class="menu-item" routerLink="/admin/noticias" routerDirection="root">
+                <ion-icon slot="start" name="newspaper-outline"></ion-icon>
+                <ion-label>Gestión noticias</ion-label>
+              </ion-item>
+            </ion-menu-toggle>
+          </ng-container>
+
+          <ion-menu-toggle auto-hide="true">
+            <ion-item class="menu-item" routerLink="/ajustes" routerDirection="root">
+              <ion-icon slot="start" name="settings-outline"></ion-icon>
+              <ion-label>Ajustes</ion-label>
+            </ion-item>
+          </ion-menu-toggle>
+        </ion-list>
+      </ion-content>
+
+      <div class="menu-fixed-footer">
+        <button class="footer-button" routerLink="/login" routerDirection="root" *ngIf="!isAuth" type="button" aria-label="Ir a iniciar sesión">
+          <ion-icon name="log-in-outline"></ion-icon>
+          <span>Iniciar sesión</span>
+        </button>
+        <button class="footer-button" *ngIf="isAuth" type="button" (click)="logout()" aria-label="Cerrar sesión">
+          <ion-icon name="log-out-outline"></ion-icon>
+          <span>Cerrar sesión</span>
+        </button>
+      </div>
+    </ion-menu>
+
+    <!-- Debe coincidir con contentId="main" -->
+    <ion-router-outlet id="main"></ion-router-outlet>
+  </ion-split-pane>
+</ion-app>

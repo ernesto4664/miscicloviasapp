@@ -1,0 +1,42 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start"><ion-menu-button autoHide="false"></ion-menu-button></ion-buttons>
+    <ion-title>Inicio</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <ion-card>
+    <ion-card-header>
+      <ion-card-title>
+        <ion-icon name="bicycle-outline"></ion-icon>
+        &nbsp; MisCiclovías
+      </ion-card-title>
+    </ion-card-header>
+  </ion-card>
+
+  <h2 class="section-title">
+    <ion-icon name="newspaper-outline" class="title-icon"></ion-icon>
+    Últimas noticias
+  </h2>
+
+  <div *ngIf="loadingNews" class="muted">Cargando…</div>
+  <div *ngIf="errorNews" class="error">{{ errorNews }}</div>
+
+  <div class="carousel news" *ngIf="!loadingNews && news.length">
+    <div class="c-item" *ngFor="let n of news; let i = index" #newsCard>
+      <a class="img-wrap" [routerLink]="['/noticias', n.slug || n.id]">
+        <img [src]="n.cover" alt="noticia" loading="lazy" (error)="onImgError($event)">
+      </a>
+      <div class="meta">
+        <div class="fecha">{{ fechaDMY(n.publishedAt) }}</div>
+        <div class="titulo" [innerText]="n.titulo"></div>
+        <a class="link" [routerLink]="['/noticias', n.slug || n.id]">Ver detalle</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="dots" *ngIf="news.length > 1">
+    <span class="dot" *ngFor="let _ of news; let i = index" [class.active]="i === activeNews"></span>
+  </div>
+</ion-content>

@@ -1,0 +1,30 @@
+// ===========================================================
+// Gradle Settings
+// - Habilita resolución/descarga automática de toolchains (JDK)
+// - Mantén los includes de los módulos del proyecto
+// ===========================================================
+
+pluginManagement {
+  repositories {
+    gradlePluginPortal()
+    google()
+    mavenCentral()
+  }
+}
+
+// Plugin para auto-provisionar toolchains (JDK) cuando un submódulo
+// pide una versión específica (p. ej., languageVersion=21).
+plugins {
+  id "org.gradle.toolchains.foojay-resolver-convention" version "0.8.0"
+}
+
+// (opcional) Nombre del rootProject en Android Studio
+rootProject.name = "android"
+
+// --- Módulos del proyecto ---
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+// Capacitor settings
+apply from: 'capacitor.settings.gradle'

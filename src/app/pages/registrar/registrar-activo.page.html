@@ -1,0 +1,50 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>Registro en curso</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<!-- pantalla completa + sin scroll interno -->
+<ion-content class="map-screen" fullscreen="true" [scrollY]="false">
+  <div class="map-full">
+    <div #mapEl class="map-el"></div>
+  </div>
+
+  <!-- Centrar -->
+  <ion-fab vertical="top" horizontal="end" slot="fixed">
+    <ion-fab-button size="small" (click)="center()">
+      <ion-icon name="locate-outline"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+
+  <!-- HUD -->
+  <div class="hud" id="regHud">
+    <div class="time">{{ timeStr() }}</div>
+
+    <div class="stats">
+      <div class="stat">
+        <b>{{ (speedKmh() | number:'1.0-1') }}</b>
+        <small>km/h</small>
+      </div>
+      <div class="stat">
+        <b>{{ (distanceKm() | number:'1.2-2') }}</b>
+        <small>km</small>
+      </div>
+    </div>
+
+    <div class="actions">
+      <ion-button expand="block" color="medium" (click)="pauseOrResume()" *ngIf="state()==='recording'">
+        Pausar
+      </ion-button>
+
+      <div class="row" *ngIf="state()==='paused'">
+        <ion-button color="success" (click)="pauseOrResume()">Reanudar</ion-button>
+        <ion-button color="danger" (click)="finalizar()">Finalizar</ion-button>
+      </div>
+
+      <ion-button expand="block" color="danger" (click)="finalizar()" *ngIf="state()==='recording'">
+        Finalizar
+      </ion-button>
+    </div>
+  </div>
+</ion-content>

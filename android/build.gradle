@@ -1,0 +1,82 @@
+// === android/build.gradle (TOP-LEVEL) ===
+
+// ---------- Buildscript ----------
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    // AGP compatible con tu proyecto actual
+    classpath 'com.android.tools.build:gradle:8.3.1'
+  }
+}
+
+// ---------- Ext / variables ----------
+def vars = file("variables.gradle")
+if (vars.canRead()) {
+  apply from: vars
+} else {
+  ext {
+    compileSdkVersion = 35
+    targetSdkVersion  = 35
+    minSdkVersion     = 23
+  }
+}
+
+// ---------- Repos globales ----------
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+/**
+ * Fuerza Java/Kotlin 17 en TODOS los módulos Android (app + plugins)
+ * y evita “invalid source release: 21”.
+ * Para Kotlin se usa reflexión: si el plugin no está presente, simplemente se omite.
+ */
+subprojects { proj ->
+  afterEvaluate {
+    def isAndroidModule =
+      proj.plugins.hasPlugin('com.android.application') ||
+        proj.plugins.hasPlugin('com.android.library')
+
+    if (isAndroidModule && proj.extensions.findByName("android") != null) {
+      // Java 17
+      proj.android {
+        compileOptions {
+          sourceCompatibility JavaVersion.VERSION_17
+          targetCompatibility JavaVersion.VERSION_17
+        }
+      }
+
+      // Kotlin -> JVM 17 (solo si el plugin kotlin está aplicado)
+      try {
+        def kClass = Class.forName("org.jetbrains.kotlin.gradle.tasks.KotlinCompile")
+        proj.tasks.withType(kClass).configureEach {
+          // La propiedad kotlinOptions existe en estas tareas
+          it.kotlinOptions.jvmTarget = "17"
+        }
+      } catch (Throwable ignored) {
+        // Plugin Kotlin no presente en este submódulo; no hacemos nada.
+      }
+
+      // También, si el plugin Java puro estuviera aplicado, fija toolchain 17
+      try {
+        def javaExt = proj.extensions.findByName("java")
+        if (javaExt != null && javaExt.hasProperty("toolchain")) {
+          javaExt.toolchain {
+            languageVersion = JavaLanguageVersion.of(17)
+          }
+        }
+      } catch (Throwable ignored) { }
+    }
+  }
+}
+
+// ---------- Limpieza ----------
+task clean(type: Delete) {
+  delete rootProject.buildDir
+}

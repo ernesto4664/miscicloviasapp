@@ -1,0 +1,65 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>Registro en curso</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="close()">Cerrar</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content fullscreen>
+  <div class="map-full">
+    <div #mapEl class="map-el"></div>
+  </div>
+
+  <!-- Centrar -->
+  <ion-fab vertical="top" horizontal="end" slot="fixed">
+    <ion-fab-button size="small" (click)="center()">
+      <ion-icon name="locate-outline"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+
+  <!-- HUD -->
+  <div class="hud">
+    <div class="time">{{ timeStr() }}</div>
+
+    <div class="stats">
+      <div class="stat">
+        <b>{{ (speedKmh() | number:'1.0-1') }}</b>
+        <small>km/h</small>
+      </div>
+      <div class="stat">
+        <b>{{ (distanceKm() | number:'1.2-2') }}</b>
+        <small>km</small>
+      </div>
+    </div>
+
+    <!-- Acciones según estado -->
+    <div class="actions">
+      <!-- recording -->
+      <ng-container *ngIf="state()==='recording'">
+        <ion-button expand="block" color="medium" (click)="pauseOrResume()">
+          Pausar
+        </ion-button>
+        <ion-button expand="block" color="danger" (click)="finalizar()">
+          Finalizar
+        </ion-button>
+      </ng-container>
+
+      <!-- paused -->
+      <ng-container *ngIf="state()==='paused'">
+        <div class="row">
+          <ion-button color="success" (click)="pauseOrResume()">Reanudar</ion-button>
+          <ion-button color="danger" (click)="finalizar()">Finalizar</ion-button>
+        </div>
+      </ng-container>
+
+      <!-- idle (después de guardar/descartar) -->
+      <ng-container *ngIf="state()==='idle'">
+        <ion-button expand="block" color="success" (click)="startNew()">
+          Iniciar
+        </ion-button>
+      </ng-container>
+    </div>
+  </div>
+</ion-content>

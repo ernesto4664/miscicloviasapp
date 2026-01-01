@@ -1,0 +1,34 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-buttons slot="start"><ion-menu-button autoHide="false"></ion-menu-button></ion-buttons>
+    <ion-title>Noticias</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="ion-padding">
+  <div *ngIf="loading" class="muted">Cargando…</div>
+  <div *ngIf="error" class="error">{{ error }}</div>
+
+  <div *ngIf="!loading && paged">
+    <div class="grid">
+      <a class="n-card" *ngFor="let n of paged.data" [routerLink]="['/noticias', n.slug || n.id]">
+        <ion-img [src]="n.cover" (ionError)="onImgError($event)"></ion-img>
+        <div class="body">
+          <div class="fecha">{{ fecha(n.publicado_en) }}</div>
+          <div class="titulo" [innerText]="n.titulo"></div>
+          <div class="resumen" *ngIf="n.resumen" [innerText]="n.resumen"></div>
+        </div>
+      </a>
+    </div>
+
+    <div class="paginador">
+      <ion-button fill="outline" size="small" [disabled]="paged.page <= 1" (click)="load(paged!.page - 1)">
+        <ion-icon name="chevron-back-outline" slot="start"></ion-icon> Anterior
+      </ion-button>
+      <span class="page-info">Página {{ paged.page }} de {{ paged.lastPage }}</span>
+      <ion-button fill="outline" size="small" [disabled]="paged.page >= paged.lastPage" (click)="load(paged!.page + 1)">
+        Siguiente <ion-icon name="chevron-forward-outline" slot="end"></ion-icon>
+      </ion-button>
+    </div>
+  </div>
+</ion-content>

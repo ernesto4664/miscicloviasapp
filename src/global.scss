@@ -1,0 +1,79 @@
+/* Core CSS required for Ionic components to work properly */
+@import "@ionic/angular/css/core.css";
+
+/* Basic CSS for apps built with Ionic */
+@import "@ionic/angular/css/normalize.css";
+@import "@ionic/angular/css/structure.css";
+@import "@ionic/angular/css/typography.css";
+@import "@ionic/angular/css/display.css";
+
+/* Optional CSS utils */
+@import "@ionic/angular/css/padding.css";
+@import "@ionic/angular/css/float-elements.css";
+@import "@ionic/angular/css/text-alignment.css";
+@import "@ionic/angular/css/text-transformation.css";
+@import "@ionic/angular/css/flex-utils.css";
+
+/* Dark mode automático según el sistema */
+@import "@ionic/angular/css/palettes/dark.system.css";
+@import "leaflet/dist/leaflet.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+
+/* ------------ ajustes globales ------------- */
+html, body, ion-app { height: 100%; }
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+ion-header, ion-toolbar {
+  padding-top: var(--ion-safe-area-top);
+}
+
+/* Look & feel de tarjetas y barras */
+ion-toolbar {
+  --background: var(--ion-color-primary);
+  --color: white;
+}
+
+ion-card {
+  border-radius: 16px;
+  box-shadow: 0 8px 22px rgba(2, 8, 23, .08);
+}
+
+ion-item { --padding-start: 0; }
+ion-item h2 { margin: 0; font-weight: 600; }
+ion-item p  { margin: 2px 0 0; opacity: .75; }
+
+/* Tabs un poco elevados */
+ion-tab-bar {
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 22px rgba(2, 8, 23, .06);
+}
+
+/* Contenedor con padding (si lo necesitas en páginas) */
+.page { padding: 16px; }
+
+/* Grupo de acciones en auth */
+.actions {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+/* Botón ancho completo */
+ion-button[expand="block"] { width: 100%; }
+
+/* Tarjetas de auth */
+.auth-card {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--ion-color-step-50, #fff);
+  box-shadow: 0 6px 20px rgba(0,0,0,.06);
+}
+
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }

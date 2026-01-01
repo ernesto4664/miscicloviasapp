@@ -1,0 +1,32 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+      <ion-menu-button autoHide="false"></ion-menu-button>
+    </ion-buttons>
+    <ion-title>Registrar recorridos</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <section class="starter">
+    <div class="card">
+      <div #previewMapEl class="mini-map"></div>
+
+      <!-- Botón flotante para centrar -->
+      <ion-fab class="mini-fab">
+        <ion-fab-button size="small" (click)="centerPreview()">
+          <ion-icon name="locate-outline"></ion-icon>
+        </ion-fab-button>
+      </ion-fab>
+
+      <div class="card-body">
+        <h3>¿Listo para salir?</h3>
+        <p>Inicia el registro para ver tu posición en el mapa y tus métricas en tiempo real.</p>
+
+        <ion-button expand="block" size="large" shape="round" color="success" (click)="onStart()">
+          INICIAR
+        </ion-button>
+      </div>
+    </div>
+  </section>
+</ion-content>

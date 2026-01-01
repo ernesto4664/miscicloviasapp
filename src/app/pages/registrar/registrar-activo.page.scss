@@ -1,0 +1,61 @@
+/* Que todo ocupe el alto completo */
+:host,
+ion-content.map-screen,
+.map-full,
+.map-el {
+  height: 100%;
+}
+
+ion-content.map-screen {
+  --background: #0b0e12;
+  --padding-top: 0;
+  --padding-bottom: 0;
+}
+
+/* Evitar scroll interno del ion-content */
+ion-content.map-screen::part(scroll) {
+  overflow: hidden;
+}
+
+/* ====== MAPA ====== */
+.map-full,
+.map-el {
+  position: absolute;
+  inset: 0;
+}
+.map-el { z-index: 1; }
+
+/* ====== HUD ====== */
+.hud {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: calc(5px + env(safe-area-inset-bottom));
+  z-index: 999;
+
+  padding: 12px 12px 16px;
+  display: grid; gap: 10px;
+
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.25) 35%, rgba(0,0,0,.45) 100%);
+  color: #fff;
+}
+
+.time { font-size: 22px; font-weight: 700; text-align: center; }
+
+.stats { display: flex; gap: 12px; justify-content: center; }
+.stat { background: rgba(0,0,0,.35); border-radius: 12px; padding: 6px 10px; text-align: center; min-width: 84px; }
+.stat b { font-size: 18px; display: block; }
+.stat small { opacity: .85; }
+
+.actions { display: grid; gap: 8px; }
+.row { display: flex; gap: 8px; justify-content: center; }
+
+/* ====== MARCADOR DEL USUARIO ====== */
+.user-nav-icon { filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+.user-nav-icon .nav-arrow {
+  transform-origin: 50% 50%;
+  transition: transform 120ms linear;
+}
+
+/* ====== CONTROLES MAPLIBRE ====== */
+.maplibregl-ctrl { margin: 8px; }
+.maplibregl-ctrl-bottom-right { bottom: 64px; } /* no tapar la tab bar */

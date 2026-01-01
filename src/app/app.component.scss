@@ -1,0 +1,73 @@
+/* el contenedor del menú debe ser relativo para posicionar el footer */
+.menu-panel {
+  position: relative;
+  min-height: 100%;
+}
+
+/* lista y items (estética compacta) */
+.menu-list { --ion-item-border-color: rgba(0,0,0,0.06); }
+
+.menu-section {
+  --min-height: 36px;
+  --padding-start: 16px;
+  --inner-padding-end: 16px;
+  ion-label {
+    font-size: 12px;
+    letter-spacing: .02em;
+    color: rgba(var(--ion-text-color-rgb), .6);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+}
+
+.menu-item {
+  --padding-start: 16px;
+  --inner-padding-end: 16px;
+  --min-height: 52px;
+  --background: transparent;
+  display: flex;
+  align-items: center;
+
+  ion-icon {
+    font-size: 22px;
+    width: 22px; height: 22px;
+    margin-inline-end: 12px;
+    opacity: .92;
+  }
+
+  ion-label { font-size: 15px; font-weight: 500; }
+}
+
+/* footer absoluto dentro del menú, con safe-area y barra superior */
+.menu-fixed-footer {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  background: var(--ion-background-color);
+  border-top: 1px solid rgba(0,0,0,0.08);
+  display: flex;
+  justify-content: center;
+}
+
+.footer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--ion-text-color);
+  cursor: pointer;
+
+  ion-icon { font-size: 22px; }
+  span     { font-size: 16px; font-weight: 600; }
+
+  /* feedback tactil */
+  &:active { background: rgba(0,0,0,.06); }
+}
+
+/* dark mode opcional */
+:host(.dark) .menu-fixed-footer { border-top-color: rgba(255,255,255,0.08); }
