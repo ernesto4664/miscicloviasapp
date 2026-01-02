@@ -6,7 +6,7 @@
 export const environment = {
   production: false,
   // Usa 127.0.0.1 para evitar rarezas con IPv6 en simuladores
-  apiUrl: 'https://miscicloviasapi.onrender.com/api/v1',
+  apiUrl: 'https://backend-damp-pond-3746.fly.dev/api/v1',
   maptilerKey: '0qOCMRmbn7DIpKSDj0WU',
   firebase: {
     apiKey: 'AIzaSyA1K13zmc-y62o5hY0KlfPXYYYxlfrdu_Q',
