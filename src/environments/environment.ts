@@ -17,6 +17,7 @@ export const environment = {
     appId: '1:818656114867:web:c822c26c493e9761ca58c6',
   },
   useBackendExchange: true,
+  googleMapsKey: 'AIzaSyDyUsVGv2XeLpAp394cawPZoWllkwBVrf0',
 };
 
 

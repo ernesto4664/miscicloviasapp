@@ -4,9 +4,10 @@
   <!-- =======================
        PERMISOS
        ======================= -->
-  <!-- Internet (tiles OSM, API propia, etc.) -->
+
+  <!-- Internet (API, tiles, etc.) -->
   <uses-permission android:name="android.permission.INTERNET" />
-  <!-- Estado de red (opcional para detectar sin conexión) -->
+  <!-- Estado de red -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
   <!-- Ubicación en primer plano -->
@@ -14,13 +15,15 @@
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
   <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
-  <!-- Ubicación en segundo plano (para tracking con la app en background) -->
+  <!-- Ubicación en segundo plano (tracking real en background) -->
   <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
-  <!-- Servicios en primer plano (tracking continuo) -->
+  <!-- Foreground service (tracking continuo) -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  <!-- Android 14+ exige declarar categoría específica -->
+  <!-- Android 14+ categoría específica -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <!-- Android 14/15: algunos escenarios/OEM pueden requerirlo (no rompe si no aplica) -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
   <!-- Notificaciones (Android 13+) si muestras notificación persistente del tracking -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -34,16 +37,22 @@
     android:theme="@style/AppTheme"
     android:usesCleartextTraffic="true">
 
-    <!-- Habilita HTTP para entornos de desarrollo.
-         Si tu backend ya es HTTPS, puedes quitar usesCleartextTraffic o ponerlo en false. -->
+    <!-- =========================================
+         GOOGLE MAPS (Capacitor Google Maps Native)
+         =========================================
+         Usamos 1 sola key: definida en strings.xml
+         -->
+    <meta-data
+      android:name="com.google.android.geo.API_KEY"
+      android:value="@string/google_maps_key" />
 
     <activity
-      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
       android:name=".MainActivity"
       android:label="@string/title_activity_main"
       android:theme="@style/AppTheme.NoActionBarLaunch"
       android:launchMode="singleTask"
-      android:exported="true">
+      android:exported="true"
+      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation">
 
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
@@ -61,10 +70,6 @@
         android:resource="@xml/file_paths" />
     </provider>
 
-    <!-- Si usas Google Maps (no necesario para Leaflet/OSM):
-    <meta-data
-        android:name="com.google.android.geo.API_KEY"
-        android:value="@string/google_maps_key" />
-    -->
   </application>
+
 </manifest>

@@ -56,6 +56,62 @@ ion-content.map-screen::part(scroll) {
   transition: transform 120ms linear;
 }
 
-/* ====== CONTROLES MAPLIBRE ====== */
-.maplibregl-ctrl { margin: 8px; }
-.maplibregl-ctrl-bottom-right { bottom: 64px; } /* no tapar la tab bar */
+/* ====== PARCHE “LOOK GOOGLE MAPS” ====== */
+
+/* Header flotante (no tapa el mapa) */
+ion-header {
+  position: absolute;
+  left: 0; right: 0;
+  top: 0;
+  z-index: 1000;
+}
+
+ion-toolbar.nav-header {
+  --background: rgba(10, 14, 18, 0.55);
+  --color: #fff;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* FAB bien posicionado (notch / status bar) */
+ion-fab[vertical="top"] {
+  top: calc(12px + env(safe-area-inset-top));
+}
+
+/* HUD: que los gestos del mapa funcionen bien */
+.hud {
+  pointer-events: none;
+}
+.hud .actions,
+.hud ion-button,
+.hud ion-chip {
+  pointer-events: auto;
+}
+
+/* Chip estado (opcional si agregas ion-chip) */
+.status {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+ion-chip {
+  --background: rgba(0, 0, 0, 0.40);
+  --color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* stats un poco más pro */
+.stat {
+  min-width: 92px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* sube un poquito el HUD para gestos Android */
+.hud {
+  bottom: calc(10px + env(safe-area-inset-bottom));
+}

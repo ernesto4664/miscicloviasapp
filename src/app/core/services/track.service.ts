@@ -43,10 +43,10 @@ export class TrackService {
   }
 
   // Filtros / umbrales
-  private minMoveMeters = 5;            // descartamos jitter < 5 m
-  private autoPauseSpeedKmh = 1.0;      // < 1 km/h durante autoPauseAfterMs → pausa
-  private autoPauseAfterMs = 9000;      // 9 s
-  private autoResumeSpeedKmh = 2.0;     // ≥ 2 km/h → reanudar
+  private minMoveMeters = 5;                 // descartamos jitter < 5 m
+  private autoPauseSpeedKmh = 1.0;           // < 1 km/h durante autoPauseAfterMs → pausa
+  private autoPauseAfterMs = 9000;           // 9 s
+  private autoResumeSpeedKmh = 2.0;          // ≥ 2 km/h → reanudar (no automático aquí, solo helper)
   private maxStopMsNewSegment = 3 * 60 * 1000; // >3 min parado → nuevo segmento
 
   // Estado auxiliar
@@ -59,7 +59,7 @@ export class TrackService {
 
   // ======= Sincronización con API =======
   private api = inject(ActivitiesApi);
-  private activityId?: number | null;          // null = aún no creada, undefined = no sincroniza
+  private activityId?: number | null;   // number = creada, undefined = no sincroniza
   private pendingBatch: PointIn[] = [];
   private batchTimer?: any;
   private readonly BATCH_MS = 3500;
@@ -83,7 +83,6 @@ export class TrackService {
     if (!raw) return false;
     try {
       const o = JSON.parse(raw);
-      // Validaciones mínimas
       const state: TrackState = (o.state === 'recording' || o.state === 'paused') ? o.state : 'idle';
       const segments: TrackSegment[] = Array.isArray(o.segments) ? o.segments : [{ points: [] }];
       if (segments.length === 0) segments.push({ points: [] });
@@ -115,15 +114,16 @@ export class TrackService {
     this.stateSig.set('recording');
     this.persistActive(true);
 
-    // API: intenta crear actividad (si hay token/api)
+    // API: intenta crear actividad
     try {
-      const res = await this.api.start(); // null si no puede llamar (offline/sin token)
-      this.activityId = res?.id ?? undefined; // undefined = no sincroniza
+      const res = await this.api.start(); // si no puede (offline/sin token) debería lanzar o devolver null
+      this.activityId = res?.id ?? undefined;
     } catch {
       this.activityId = undefined;
     }
+
     this.pendingBatch = [];
-    if (this.activityId && !this.batchTimer) {
+    if (typeof this.activityId === 'number' && !this.batchTimer) {
       this.batchTimer = setInterval(() => this.flushBatch(), this.BATCH_MS);
     }
   }
@@ -131,30 +131,45 @@ export class TrackService {
   // Alias útil para tu flujo en el modal
   startNew() { this.start(); }
 
-  async pause(manual = true) {
+  // --- Local (sin API) para evitar bugs en finalize() ---
+  private pauseLocal(now = Date.now()) {
     if (this.stateSig() !== 'recording') return;
     this.stateSig.set('paused');
-    this.pauseStartedAtSig.set(Date.now());
+    this.pauseStartedAtSig.set(now);
+    this.persistActive(false);
+  }
+
+  private resumeLocal(now = Date.now()) {
+    if (this.stateSig() !== 'paused') return;
+    const pauseStarted = this.pauseStartedAtSig();
+    if (pauseStarted) {
+      this.pausedAccumMsSig.set(this.pausedAccumMsSig() + Math.max(0, now - pauseStarted));
+    }
+    this.pauseStartedAtSig.set(0);
+    this.idleSinceTs = 0;
+    this.stateSig.set('recording');
+    this.persistActive(false);
+  }
+
+  async pause(manual = true) {
+    if (this.stateSig() !== 'recording') return;
+    this.pauseLocal(Date.now());
     this.persistActive(manual);
 
     // API
     await this.flushBatch();
-    if (this.activityId) {
+    if (typeof this.activityId === 'number') {
       try { await this.api.pause(this.activityId); } catch {}
     }
   }
 
   async resume(manual = true) {
     if (this.stateSig() !== 'paused') return;
-    const now = Date.now();
-    this.pausedAccumMsSig.set(this.pausedAccumMsSig() + (now - this.pauseStartedAtSig()));
-    this.pauseStartedAtSig.set(0);
-    this.idleSinceTs = 0;
-    this.stateSig.set('recording');
+    this.resumeLocal(Date.now());
     this.persistActive(manual);
 
     // API
-    if (this.activityId) {
+    if (typeof this.activityId === 'number') {
       try { await this.api.resume(this.activityId); } catch {}
     }
   }
@@ -162,7 +177,7 @@ export class TrackService {
   // Resumen actual (usado al finalizar)
   getSummary(): TrackSummary {
     const start = this.startedAtSig() || Date.now();
-    const end = (this.stateSig() === 'paused' ? this.pauseStartedAtSig() : Date.now());
+    const end = (this.stateSig() === 'paused' ? (this.pauseStartedAtSig() || Date.now()) : Date.now());
     const durationMs = Math.max(0, end - start - this.pausedAccumMsSig());
     const distanceKm = this.distanceKmSig();
     const hours = durationMs / 3_600_000;
@@ -192,8 +207,10 @@ export class TrackService {
 
   /** Finaliza y, si `save` es true, guarda localmente y notifica API si aplica. */
   finalize(save: boolean): { saved: TrackSaved | null; summary: TrackSummary } {
-    // Si estaba pausado, normalizamos tiempos (sin "reanudar" UI)
-    if (this.stateSig() === 'paused') this.resume(false);
+    // Si estaba pausado: normaliza tiempos SIN llamar API ni async
+    if (this.stateSig() === 'paused') {
+      this.resumeLocal(Date.now());
+    }
 
     const summary = this.getSummary();
     let saved: TrackSaved | null = null;
@@ -214,7 +231,7 @@ export class TrackService {
     // API (no bloquea la UI si falla)
     const actId = this.activityId;
     this.flushBatch().finally(() => {
-      if (actId) {
+      if (typeof actId === 'number') {
         this.api.finish(actId, {
           elapsed_ms: summary.durationMs,
           distance_m: summary.distanceKm * 1000,
@@ -231,7 +248,6 @@ export class TrackService {
   // ======= Historial =======
   getSaved(): TrackSaved[] {
     const list: TrackSaved[] = JSON.parse(localStorage.getItem(LS_KEY_SAVED) || '[]');
-    // Orden más reciente primero
     return list.sort((a, b) => b.startedAt - a.startedAt);
   }
 
@@ -261,57 +277,73 @@ export class TrackService {
   onPosition(lat: number, lng: number, ts: number, speed?: number, accuracy?: number) {
     if (this.stateSig() !== 'recording') return;
 
-    // Descarta puntos con muy mala precisión
-    if (typeof accuracy === 'number' && accuracy > MAX_ACCURACY_M) return;
-
-    const ll = L.latLng(lat, lng);
     const now = ts || Date.now();
 
+    // IMPORTANTE: lastPt ANTES de pushear el punto nuevo
     const lastPt = this.getLastPoint();
     let movedMeters = 0;
-    if (lastPt) movedMeters = ll.distanceTo(L.latLng(lastPt.lat, lastPt.lng));
 
-    // Ignora jitter / parado
-    if (lastPt && movedMeters < this.minMoveMeters) {
-      this.considerIdle(now, speed);
-      this.maybePersist();
-      return;
+    if (lastPt) {
+      const ll = L.latLng(lat, lng);
+      movedMeters = ll.distanceTo(L.latLng(lastPt.lat, lastPt.lng));
     }
 
-    // Si llevamos mucho parados → nuevo segmento (evita “línea recta” tras reanudar)
-    if (this.pauseStartedAtSig() === 0 && this.idleSinceTs && (now - this.idleSinceTs) > this.maxStopMsNewSegment) {
-      this.segments.push({ points: [] });
-    }
+    const acc = (typeof accuracy === 'number' ? accuracy : undefined);
 
-    // Agrega punto
-    const p: TrackPoint = { lat, lng, ts: now, speed, acc: accuracy };
+    // 1) Siempre guardamos el punto (para no “cortar” el trazo),
+    //    pero si accuracy es mala, NO suma distancia y NO recalcula velocidad.
+    const p: TrackPoint = { lat, lng, ts: now, speed, acc };
     this.currentSeg.points.push(p);
 
-    // Distancia acumulada
-    if (lastPt) this.distanceKmSig.set(this.distanceKmSig() + (movedMeters / 1000));
+    const accOk = (acc == null) ? true : acc <= MAX_ACCURACY_M;
 
-    // Velocidad (suavizada)
-    let vKmh: number | undefined;
-    if (typeof speed === 'number' && !Number.isNaN(speed)) {
-      vKmh = Math.max(0, speed * 3.6);
-    } else if (lastPt) {
-      const dt = Math.max(0.25, (now - lastPt.ts) / 1000);
-      vKmh = (movedMeters / dt) * 3.6;
+    // 2) Si hay punto previo y acc buena, aplicamos reglas normales
+    if (lastPt && accOk) {
+      // Ignora jitter / parado
+      if (movedMeters < this.minMoveMeters) {
+        this.considerIdle(now, speed);
+        this.maybePersist();
+        return;
+      }
+
+      // Nuevo segmento si mucho parado
+      if (
+        this.pauseStartedAtSig() === 0 &&
+        this.idleSinceTs &&
+        (now - this.idleSinceTs) > this.maxStopMsNewSegment
+      ) {
+        this.segments.push({ points: [] });
+      }
+
+      // Distancia acumulada
+      this.distanceKmSig.set(this.distanceKmSig() + (movedMeters / 1000));
+
+      // Velocidad (suavizada)
+      let vKmh: number | undefined;
+      if (typeof speed === 'number' && !Number.isNaN(speed)) {
+        vKmh = Math.max(0, speed * 3.6);
+      } else {
+        const dt = Math.max(0.25, (now - lastPt.ts) / 1000);
+        vKmh = (movedMeters / dt) * 3.6;
+      }
+
+      if (typeof vKmh === 'number') {
+        this.speedSmoothKmh = this.speedAlpha * vKmh + (1 - this.speedAlpha) * this.speedSmoothKmh;
+        this.speedKmhSig.set(this.speedSmoothKmh);
+      }
+
+      this.idleSinceTs = 0;
+    } else {
+      // 3) Accuracy mala: NO sumes distancia, pero sí considera idle
+      this.considerIdle(now, speed);
     }
-    if (typeof vKmh === 'number') {
-      this.speedSmoothKmh = this.speedAlpha * vKmh + (1 - this.speedAlpha) * this.speedSmoothKmh;
-      this.speedKmhSig.set(this.speedSmoothKmh);
-    }
 
-    // Ya no estamos inactivos
-    this.idleSinceTs = 0;
-
-    // Batch a la API si corresponde
-    if (this.activityId) {
+    // 4) Batch a la API si corresponde
+    if (typeof this.activityId === 'number') {
       this.pendingBatch.push({
         ts: now, lat, lng,
-        accuracy_m: (typeof accuracy === 'number' ? accuracy : undefined),
-        speed_mps:  (typeof speed === 'number' ? speed : undefined)
+        accuracy_m: acc,
+        speed_mps: (typeof speed === 'number' ? speed : undefined),
       });
     }
 
@@ -326,9 +358,14 @@ export class TrackService {
 
   private considerIdle(now: number, speed?: number) {
     if (!this.idleSinceTs) this.idleSinceTs = now;
-    const effectiveSpeed = (typeof speed === 'number' && !Number.isNaN(speed)) ? speed * 3.6 : this.speedKmhSig();
+
+    const effectiveSpeed =
+      (typeof speed === 'number' && !Number.isNaN(speed))
+        ? speed * 3.6
+        : this.speedKmhSig();
+
     if (effectiveSpeed < this.autoPauseSpeedKmh && (now - this.idleSinceTs) > this.autoPauseAfterMs) {
-      if (this.stateSig() === 'recording') this.pause(false);
+      if (this.stateSig() === 'recording') void this.pause(false);
     }
   }
 
@@ -347,7 +384,7 @@ export class TrackService {
   }
 
   private async flushBatch() {
-    if (!this.activityId || !this.pendingBatch.length) return;
+    if (typeof this.activityId !== 'number' || !this.pendingBatch.length) return;
     const batch = this.pendingBatch.splice(0, this.pendingBatch.length);
     try {
       await this.api.pushPoints(this.activityId, batch);

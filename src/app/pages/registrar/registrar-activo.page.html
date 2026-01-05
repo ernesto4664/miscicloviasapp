@@ -1,26 +1,42 @@
-<ion-header [translucent]="true">
-  <ion-toolbar color="primary">
+<ion-header translucent>
+  <ion-toolbar color="primary" class="nav-header">
     <ion-title>Registro en curso</ion-title>
   </ion-toolbar>
 </ion-header>
 
 <!-- pantalla completa + sin scroll interno -->
 <ion-content class="map-screen" fullscreen="true" [scrollY]="false">
+  <!-- MAPA -->
   <div class="map-full">
     <div #mapEl class="map-el"></div>
   </div>
 
-  <!-- Centrar -->
+  <!-- RE-ENGANCHAR NAVEGACIÓN -->
   <ion-fab vertical="top" horizontal="end" slot="fixed">
     <ion-fab-button size="small" (click)="center()">
-      <ion-icon name="locate-outline"></ion-icon>
+      <ion-icon name="navigate-outline"></ion-icon>
     </ion-fab-button>
   </ion-fab>
 
   <!-- HUD -->
   <div class="hud" id="regHud">
+    <!-- Estado -->
+    <div class="status">
+      <ion-chip color="success" *ngIf="state()==='recording'">
+        <ion-icon name="radio-button-on-outline"></ion-icon>
+        <ion-label>Grabando</ion-label>
+      </ion-chip>
+
+      <ion-chip color="warning" *ngIf="state()==='paused'">
+        <ion-icon name="pause-outline"></ion-icon>
+        <ion-label>Pausado</ion-label>
+      </ion-chip>
+    </div>
+
+    <!-- Tiempo -->
     <div class="time">{{ timeStr() }}</div>
 
+    <!-- Stats navegación -->
     <div class="stats">
       <div class="stat">
         <b>{{ (speedKmh() | number:'1.0-1') }}</b>
@@ -32,17 +48,26 @@
       </div>
     </div>
 
+    <!-- Acciones -->
     <div class="actions">
-      <ion-button expand="block" color="medium" (click)="pauseOrResume()" *ngIf="state()==='recording'">
+      <ion-button expand="block" color="medium"
+        (click)="pauseOrResume()"
+        *ngIf="state()==='recording'">
         Pausar
       </ion-button>
 
       <div class="row" *ngIf="state()==='paused'">
-        <ion-button color="success" (click)="pauseOrResume()">Reanudar</ion-button>
-        <ion-button color="danger" (click)="finalizar()">Finalizar</ion-button>
+        <ion-button color="success" (click)="pauseOrResume()">
+          Reanudar
+        </ion-button>
+        <ion-button color="danger" (click)="finalizar()">
+          Finalizar
+        </ion-button>
       </div>
 
-      <ion-button expand="block" color="danger" (click)="finalizar()" *ngIf="state()==='recording'">
+      <ion-button expand="block" color="danger"
+        (click)="finalizar()"
+        *ngIf="state()==='recording'">
         Finalizar
       </ion-button>
     </div>
