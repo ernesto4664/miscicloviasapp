@@ -4,72 +4,96 @@
   </ion-toolbar>
 </ion-header>
 
-<!-- pantalla completa + sin scroll interno -->
-<ion-content class="map-screen" fullscreen="true" [scrollY]="false">
-  <!-- MAPA -->
+<ion-content
+  class="map-screen page-dark"
+  fullscreen="true"
+  [scrollY]="false"
+>
+
+  <!-- ================= MAPA ================= -->
   <div class="map-full">
     <div #mapEl class="map-el"></div>
   </div>
 
-  <!-- RE-ENGANCHAR NAVEGACIÓN -->
+  <!-- ===== Re-centrar navegación ===== -->
   <ion-fab vertical="top" horizontal="end" slot="fixed">
     <ion-fab-button size="small" (click)="center()">
       <ion-icon name="navigate-outline"></ion-icon>
     </ion-fab-button>
   </ion-fab>
 
-  <!-- HUD -->
+  <!-- ================= HUD ================= -->
   <div class="hud" id="regHud">
+
     <!-- Estado -->
     <div class="status">
-      <ion-chip color="success" *ngIf="state()==='recording'">
+      <ion-chip color="success" *ngIf="state() === 'recording'">
         <ion-icon name="radio-button-on-outline"></ion-icon>
         <ion-label>Grabando</ion-label>
       </ion-chip>
 
-      <ion-chip color="warning" *ngIf="state()==='paused'">
+      <ion-chip color="warning" *ngIf="state() === 'paused'">
         <ion-icon name="pause-outline"></ion-icon>
         <ion-label>Pausado</ion-label>
       </ion-chip>
     </div>
 
     <!-- Tiempo -->
-    <div class="time">{{ timeStr() }}</div>
+    <div class="time">
+      {{ timeStr() }}
+    </div>
 
-    <!-- Stats navegación -->
+    <!-- Stats -->
     <div class="stats">
       <div class="stat">
-        <b>{{ (speedKmh() | number:'1.0-1') }}</b>
+        <b>{{ speedKmh() | number:'1.0-1' }}</b>
         <small>km/h</small>
       </div>
+
       <div class="stat">
-        <b>{{ (distanceKm() | number:'1.2-2') }}</b>
+        <b>{{ distanceKm() | number:'1.2-2' }}</b>
         <small>km</small>
       </div>
     </div>
 
-    <!-- Acciones -->
-    <div class="actions">
-      <ion-button expand="block" color="medium"
+    <!-- ================= ACCIONES ================= -->
+
+    <!-- Grabando -->
+    <div class="actions-row" *ngIf="state() === 'recording'">
+      <ion-button
+        class="action-btn btn-neutral"
         (click)="pauseOrResume()"
-        *ngIf="state()==='recording'">
+      >
         Pausar
       </ion-button>
 
-      <div class="row" *ngIf="state()==='paused'">
-        <ion-button color="success" (click)="pauseOrResume()">
-          Reanudar
-        </ion-button>
-        <ion-button color="danger" (click)="finalizar()">
-          Finalizar
-        </ion-button>
-      </div>
-
-      <ion-button expand="block" color="danger"
+      <ion-button
+        class="action-btn"
+        color="danger"
         (click)="finalizar()"
-        *ngIf="state()==='recording'">
+      >
         Finalizar
       </ion-button>
     </div>
+
+    <!-- Pausado -->
+    <div class="actions-row" *ngIf="state() === 'paused'">
+      <ion-button
+        class="action-btn"
+        color="success"
+        (click)="pauseOrResume()"
+      >
+        Reanudar
+      </ion-button>
+
+      <ion-button
+        class="action-btn"
+        color="danger"
+        (click)="finalizar()"
+      >
+        Finalizar
+      </ion-button>
+    </div>
+
   </div>
 </ion-content>

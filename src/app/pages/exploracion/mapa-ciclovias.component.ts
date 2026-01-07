@@ -36,7 +36,7 @@ L.Icon.Default.mergeOptions({
   `,
   styles: [`
     :host{display:block}
-    .map-wrap{position:relative;height:calc(100dvh - 150px);min-height:420px;padding:10px}
+    .map-wrap{position:relative;height:calc(100dvh - 113px);min-height:420px;padding:10px}
     #map{height:100%;width:100%;border-radius:14px;background:#f4f5f7;box-shadow:0 2px 10px rgba(0,0,0,.08)}
     .legend{position:absolute;right:14px;bottom:14px;background:#fff;padding:.6rem .8rem;border-radius:.6rem;box-shadow:0 1px 3px rgba(0,0,0,.18);font-size:.9rem;z-index:1000}
     .legend b{display:block;margin-bottom:.35rem}

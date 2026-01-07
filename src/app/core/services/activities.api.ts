@@ -27,38 +27,57 @@ export interface GeoFeatureLine {
 export class ActivitiesApi {
   private http = inject(HttpClient);
   private auth = inject(AuthService);
-  private base = `${environment.apiUrl}/api/v1/activities`;
+
+  /**
+   * Blindado:
+   * - Si environment.apiUrl viene como "https://dominio/api/v1" => lo convertimos a "https://dominio"
+   * - Si viene "https://dominio" => lo dejamos igual
+   */
+  private root = String(environment.apiUrl || '')
+    .replace(/\/$/, '')
+    .replace(/\/api\/v1$/, '');
+
+  private base = `${this.root}/api/v1/activities`;
 
   private headers() {
     const token = this.auth.getToken();
     return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
   }
+
   private canCall(): boolean {
-    return !!this.auth.getToken() && !!environment.apiUrl;
+    // si quieres exigir token, deja esto tal cual.
+    // si tu backend permite anon, cambia a: return !!this.root;
+    return !!this.auth.getToken() && !!this.root;
   }
 
   async start(): Promise<StartOut | null> {
     if (!this.canCall()) return null;
     return await firstValueFrom(this.http.post<StartOut>(`${this.base}/start`, {}, this.headers()));
   }
+
   async pushPoints(activityId: number, batch: PointIn[]): Promise<void> {
     if (!this.canCall() || !batch.length) return;
-    await firstValueFrom(this.http.post<void>(`${this.base}/${activityId}/points/batch`, batch, this.headers()));
+    await firstValueFrom(
+      this.http.post<void>(`${this.base}/${activityId}/points/batch`, batch, this.headers())
+    );
   }
+
   async pause(activityId: number): Promise<void> {
     if (!this.canCall()) return;
     await firstValueFrom(this.http.post<void>(`${this.base}/${activityId}/pause`, {}, this.headers()));
   }
+
   async resume(activityId: number): Promise<void> {
     if (!this.canCall()) return;
     await firstValueFrom(this.http.post<void>(`${this.base}/${activityId}/resume`, {}, this.headers()));
   }
+
   async finish(activityId: number, payload: FinishIn): Promise<void> {
     if (!this.canCall()) return;
-    await firstValueFrom(this.http.post(`${this.base}/${activityId}/finish`, payload, this.headers()));
+    await firstValueFrom(this.http.post<void>(`${this.base}/${activityId}/finish`, payload, this.headers()));
   }
 
-  /** NUEVO: map-matching; save=true para que persista en DB si tu backend lo permite */
+  /** map-matching; save=true para que persista en DB si tu backend lo permite */
   async mapmatch(activityId: number, save = true): Promise<GeoFeatureLine | null> {
     if (!this.canCall()) return null;
     return await firstValueFrom(

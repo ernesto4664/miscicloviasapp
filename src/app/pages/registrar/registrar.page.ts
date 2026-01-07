@@ -19,7 +19,6 @@ import { AuthService } from '../../core/services/auth.service';
 import { TrackService } from '../../core/services/track.service';
 import { TrackingModalComponent } from './tracking-modal.component';
 
-
 @Component({
   standalone: true,
   selector: 'app-registrar',
@@ -56,7 +55,7 @@ export class RegistrarPage implements OnInit, AfterViewInit {
   }
 
   ngOnInit() {}
-  ngAfterViewInit() { this.initPreviewMap(); }
+  ngAfterViewInit() { void this.initPreviewMap(); }
 
   // ---------- Helpers de permisos ----------
   private async ensurePerms(): Promise<boolean> {
@@ -108,7 +107,7 @@ export class RegistrarPage implements OnInit, AfterViewInit {
         { enableHighAccuracy: true, maximumAge: 0, timeout: ms },
         (pos, err) => {
           if (cleared) return;
-          if (err || !pos) return;   // seguimos esperando
+          if (err || !pos) return;
           cleared = true;
           clearTimeout(timer);
           if (watchId) Geolocation.clearWatch({ id: watchId });
@@ -135,12 +134,10 @@ export class RegistrarPage implements OnInit, AfterViewInit {
     ]);
     try { return await race2 as import('@capacitor/geolocation').GeolocationPosition; } catch {}
 
-    // Fallback (centrar algo mientras tanto)
     try {
       return await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 });
     } catch {}
 
-    // Último recurso: Santiago
     await this.showToast('No pudimos fijar tu ubicación a tiempo. Revisa GPS/precisión.');
     return {
       coords: { latitude: -33.45, longitude: -70.66, accuracy: 9999, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
@@ -159,8 +156,8 @@ export class RegistrarPage implements OnInit, AfterViewInit {
       // “calentamos” el GPS (rápido, no bloquea)
       Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 }).catch(() => null);
 
-      // arranca tracking (idempotente)
-      this.trk.start();
+      // ✅ arranca tracking (idempotente)
+      await this.trk.start();
 
       // navega a la página de tracking activo
       await this.router.navigateByUrl('/tabs/registrar/activo');
@@ -184,11 +181,9 @@ export class RegistrarPage implements OnInit, AfterViewInit {
       }).addTo(this.previewMap);
     }
 
-    // centro por defecto
     let center = L.latLng(-33.4489, -70.6693);
 
     try {
-      // Usa best-of-N corto para tener un preview más fino (rápido)
       const pos = await Promise.race([
         this.collectPositions(2500, 8000),
         Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }),
@@ -196,12 +191,9 @@ export class RegistrarPage implements OnInit, AfterViewInit {
 
       const acc = pos.coords.accuracy ?? 9999;
       const base = L.latLng(pos.coords.latitude, pos.coords.longitude);
-      // suaviza un poco el preview (EMA suave)
       const alpha = acc <= this.ACC_GOOD ? 0.35 : (acc <= this.ACC_OK ? 0.25 : 0.15);
       center = this.ema(alpha, base.lat, base.lng);
-    } catch {
-      // si falla, nos quedamos con el centro por defecto
-    }
+    } catch {}
 
     this.previewMap.setView(center, 16);
 
@@ -218,7 +210,6 @@ export class RegistrarPage implements OnInit, AfterViewInit {
 
   async centerPreview() {
     try {
-      // usa un intent rápido con alta precisión
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 250 });
       const acc = pos.coords.accuracy ?? 9999;
       const raw = L.latLng(pos.coords.latitude, pos.coords.longitude);
@@ -234,7 +225,6 @@ export class RegistrarPage implements OnInit, AfterViewInit {
         this.previewMarker.setLatLng(ll);
       }
     } catch {
-      // si falla, recentra al último center visible
       const center = this.previewMap?.getCenter();
       if (center) this.previewMap?.setView(center, 16, { animate: true });
     }

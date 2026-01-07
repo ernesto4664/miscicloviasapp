@@ -1,94 +1,103 @@
-/* Que todo ocupe el alto completo */
-:host,
-ion-content.map-screen,
-.map-full,
-.map-el {
+/* =========================
+   HOST / FULLSCREEN
+========================= */
+:host {
+  --mc-tabbar-h: 56px;
+  display: block;
+  height: 100vh;
+}
+
+/* ion-content transparente para ver el mapa nativo */
+ion-content.map-screen {
+  --background: transparent;
+  --padding-top: 0;
+  --padding-bottom: 0;
   height: 100%;
 }
 
-ion-content.map-screen {
-  --background: #0b0e12;
-  --padding-top: 0;
-  --padding-bottom: 0;
+/* ✅ esto evita que Ionic pinte un layer blanco/negro arriba */
+ion-content.map-screen::part(background) {
+  background: transparent !important;
 }
 
-/* Evitar scroll interno del ion-content */
+/* ✅ en algunos Android el scroll part trae fondo */
 ion-content.map-screen::part(scroll) {
+  background: transparent !important;
   overflow: hidden;
 }
 
-/* ====== MAPA ====== */
-.map-full,
+/* =========================
+   MAPA NATIVO (OBLIGATORIO)
+========================= */
+.map-full {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
 .map-el {
   position: absolute;
   inset: 0;
-}
-.map-el { z-index: 1; }
-
-/* ====== HUD ====== */
-.hud {
-  position: fixed;
-  left: 0; right: 0;
-  bottom: calc(5px + env(safe-area-inset-bottom));
-  z-index: 999;
-
-  padding: 12px 12px 16px;
-  display: grid; gap: 10px;
-
-  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.25) 35%, rgba(0,0,0,.45) 100%);
-  color: #fff;
+  width: 100%;
+  height: 100%;
 }
 
-.time { font-size: 22px; font-weight: 700; text-align: center; }
-
-.stats { display: flex; gap: 12px; justify-content: center; }
-.stat { background: rgba(0,0,0,.35); border-radius: 12px; padding: 6px 10px; text-align: center; min-width: 84px; }
-.stat b { font-size: 18px; display: block; }
-.stat small { opacity: .85; }
-
-.actions { display: grid; gap: 8px; }
-.row { display: flex; gap: 8px; justify-content: center; }
-
-/* ====== MARCADOR DEL USUARIO ====== */
-.user-nav-icon { filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
-.user-nav-icon .nav-arrow {
-  transform-origin: 50% 50%;
-  transition: transform 120ms linear;
-}
-
-/* ====== PARCHE “LOOK GOOGLE MAPS” ====== */
-
-/* Header flotante (no tapa el mapa) */
+/* =========================
+   HEADER encima del mapa
+========================= */
 ion-header {
   position: absolute;
-  left: 0; right: 0;
+  left: 0;
+  right: 0;
   top: 0;
   z-index: 1000;
 }
 
 ion-toolbar.nav-header {
-  --background: rgba(10, 14, 18, 0.55);
-  --color: #fff;
+  --background: rgba(15, 23, 42, 0.72);
+  --color: #ffffff;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
-/* FAB bien posicionado (notch / status bar) */
+/* FAB arriba */
 ion-fab[vertical="top"] {
   top: calc(12px + env(safe-area-inset-top));
+  z-index: 1100;
 }
 
-/* HUD: que los gestos del mapa funcionen bien */
+/* =========================
+   HUD
+========================= */
 .hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 1200;
+
+  bottom: calc(var(--mc-tabbar-h) + env(safe-area-inset-bottom) + 8px);
+
+  padding: 12px 12px 14px;
+  display: grid;
+  gap: 10px;
+
+  color: #fff;
+
+  background: rgba(15, 23, 42, 0.92);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+
   pointer-events: none;
 }
-.hud .actions,
+
+/* solo lo clickeable recibe eventos */
+.hud .actions-row,
 .hud ion-button,
-.hud ion-chip {
+.hud ion-chip,
+.hud ion-icon {
   pointer-events: auto;
 }
 
-/* Chip estado (opcional si agregas ion-chip) */
 .status {
   display: flex;
   justify-content: center;
@@ -96,22 +105,63 @@ ion-fab[vertical="top"] {
 }
 
 ion-chip {
-  --background: rgba(0, 0, 0, 0.40);
+  --background: rgba(255, 255, 255, 0.14);
   --color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-/* stats un poco más pro */
+/* Tiempo */
+.time {
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+}
+
+/* Stats */
+.stats {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
 .stat {
-  min-width: 92px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  min-width: 98px;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
-/* sube un poquito el HUD para gestos Android */
-.hud {
-  bottom: calc(10px + env(safe-area-inset-bottom));
+.stat b {
+  display: block;
+  font-size: 16px;
+}
+
+.stat small {
+  opacity: 0.9;
+}
+
+/* Botones */
+.actions-row {
+  display: flex;
+  gap: 12px;
+}
+
+.action-btn {
+  flex: 1;
+  height: 52px;
+  font-size: 15px;
+  font-weight: 800;
+  border-radius: 14px;
+}
+
+/* Neutral */
+.btn-neutral {
+  --background: rgba(255, 255, 255, 0.16);
+  --background-activated: rgba(255, 255, 255, 0.24);
+  --color: #ffffff;
+  --border-color: rgba(255, 255, 255, 0.20);
+  --border-style: solid;
+  --border-width: 1px;
 }

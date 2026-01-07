@@ -1,6 +1,11 @@
 // =========================
-// registrar-activo.page.ts (Google Maps Capacitor + Web)
+// registrar-activo.page.ts (Google Maps Capacitor - NATIVE FIRST)
+//  ✅ Cola de posiciones (evita lag del cursor por awaits)
+//  ✅ Cronómetro no se queda corriendo al salir (Ionic cache)
+//  ✅ Permisos robustos
+//  ✅ Init zoom correcto + try/catch en llamadas mapa
 // =========================
+
 import {
   Component, AfterViewInit, OnDestroy, ElementRef, ViewChild,
   inject, computed, signal, effect, EffectRef, NgZone
@@ -16,12 +21,10 @@ import { TrackService } from '../../core/services/track.service';
 import { FinishConfirmModal } from './finish-confirm.modal';
 import { environment } from '../../../environments/environment';
 
-// === Tipos auxiliares ===
 type LonLat = [number, number];
 
 interface FollowInfo {
   spKmh?: number;
-  hasHeading?: boolean;
   prev?: LonLat | null;
 }
 
@@ -42,20 +45,34 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private platform = inject(Platform);
   private zone = inject(NgZone);
 
-  // ====== estado expuesto por el servicio ======
   state = this.trk.stateSig;
   distanceKm = this.trk.distanceKmSig;
   speedKmh = this.trk.speedKmhSig;
 
-  // ====== Cronómetro en vivo ======
+  // =========================
+  // CRONÓMETRO
+  // =========================
   private tick = signal(0);
   private tickTimer?: any;
+
+  // ✅ Ionic cache: cuando sales de la página, el component puede NO destruirse.
+  // Este flag asegura que el interval no quede vivo.
+  private inView = signal(false);
+
   private tickEff: EffectRef = effect(() => {
-    const s = this.state();
-    if (s === 'recording') {
-      if (!this.tickTimer) this.tickTimer = setInterval(() => this.tick.update(v => v + 1), 1000);
+    // depende de state + inView
+    const view = this.inView();
+    const st = this.state();
+
+    if (view && st === 'recording') {
+      if (!this.tickTimer) {
+        this.tickTimer = setInterval(() => this.tick.update(v => v + 1), 1000);
+      }
     } else {
-      if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = undefined; }
+      if (this.tickTimer) {
+        clearInterval(this.tickTimer);
+        this.tickTimer = undefined;
+      }
     }
   });
 
@@ -64,8 +81,15 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     const st = this.state();
     const start = this.trk.startedAtSig();
     if (st === 'idle' || !start) return '00:00:00';
-    const nowOrPaused = (st === 'paused' ? this.trk.pauseStartedAtSig() : Date.now());
-    const ms = (nowOrPaused || Date.now()) - start - this.trk.pausedAccumMsSig();
+
+    const nowOrPaused = (st === 'paused'
+      ? this.trk.pauseStartedAtSig()
+      : Date.now());
+
+    const ms = (nowOrPaused || Date.now())
+      - start
+      - this.trk.pausedAccumMsSig();
+
     const s = Math.max(0, Math.floor(ms / 1000));
     const hh = String(Math.floor(s / 3600)).padStart(2, '0');
     const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
@@ -73,392 +97,597 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     return `${hh}:${mm}:${ss}`;
   });
 
-  // ====== Google Map ======
+  // =========================
+  // MAPA
+  // =========================
   private map?: GoogleMap;
   private mapReady = false;
 
-  // cámara / navegación
-  private animFollow = true;
-  private userInteracting = false;
   private lastCenter: LonLat | null = null;
   private lastBearing = 0;
   private headingDeg = 0;
 
   private readonly FOLLOW_ZOOM = 18;
-  private readonly FOLLOW_TILT = 60;
-  private readonly MOVE_MIN_KMH = 2.2;
+  private readonly MOVE_MIN_KMH = 0.5;
+  private readonly IGNORE_ACC = 999; // (999 => no filtra casi nunca)
 
-  // ====== Geoloc / tracking ======
   private watchId?: string;
-  private firstFixOk = false;
 
-  // EMA para suavizar GPS
+  // =========================
+  // EMA GPS
+  // =========================
   private emaLat?: number;
   private emaLng?: number;
   private ema(alpha: number, lat: number, lng: number): LonLat {
-    this.emaLat = (this.emaLat === undefined) ? lat : (alpha * lat + (1 - alpha) * this.emaLat);
-    this.emaLng = (this.emaLng === undefined) ? lng : (alpha * lng + (1 - alpha) * this.emaLng);
-    return [this.emaLng, this.emaLat]; // [lng, lat]
+    this.emaLat = this.emaLat === undefined ? lat : alpha * lat + (1 - alpha) * this.emaLat;
+    this.emaLng = this.emaLng === undefined ? lng : alpha * lng + (1 - alpha) * this.emaLng;
+    return [this.emaLng, this.emaLat];
   }
 
-  // ====== Polylines por segmentos ======
+  // =========================
+  // MARKER (Flecha)
+  // =========================
+  private userMarkerId?: string;
+  private readonly NAV_ICON_URL = 'assets/icon/up-arrow.png';
+  private readonly NAV_ICON_SIZE = 48;
+
+  // =========================
+  // TRAZADO (Polyline) VISUAL
+  // =========================
   private activeLineId?: string;
   private activePath: LonLat[] = [];
-  private segmentLines: { id: string; path: LonLat[] }[] = [];
+  private readonly TRACE_MIN_METERS = 1.2;
+  private readonly TRACE_MAX_POINTS = 7000;
 
-  // ====== Marker del usuario ======
-  private userMarkerId?: string;
+  private lastDrawPoint: LonLat | null = null;
+  private readonly MAX_JUMP_METERS = 80;
 
-  // ====== Auto pausa / reanudar ======
-  private readonly auto = { stopSpeedKmh: 1.0, stopGraceMs: 10000, resumeSpeedKmh: 2.0, resumeGraceMs: 3000 };
-  private stillSince?: number;
-  private movingSince?: number;
+  // =========================
+  // SNAP (ROADS)
+  // =========================
+  private snapBusy = false;
+  private lastSnapAtMs = 0;
+  private snapAnchor: LonLat | null = null;
 
-  // Pausa inteligente: si se mueve mucho en pausa, cortamos trazo
-  private pausedAt?: LonLat | null;
-  private pendingResumeCheck = false;
-  private readonly GAP_IF_MOVED_OVER_M = 20;
+  private readonly SNAP_EVERY_METERS = 250;
+  private readonly SNAP_MIN_SECONDS = 12;
+  private readonly SNAP_TAIL_POINTS = 90;
 
-  // thresholds visuales
-  private readonly ACCEPT_ACC = 65;
-  private readonly IGNORE_ACC = 200;
+  // =========================
+  // MAP STYLE
+  // =========================
+  private readonly DARK_MAP_STYLE: google.maps.MapTypeStyle[] = [
+    { elementType: 'geometry', stylers: [{ color: '#121822' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#b7c7d3' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#121822' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2a3440' }] },
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2b9bff' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0c1a26' }] },
+  ];
+
+  // =========================
+  // DEVICE HEADING
+  // =========================
+  private deviceHeadingDeg: number | null = null;
+  private deviceHeadingOk = false;
+  private orientationHandler?: (ev: DeviceOrientationEvent) => void;
+
+  // =========================
+  // POS QUEUE (anti backlog)
+  // =========================
+  private posBusy = false;
+  private pendingPos: Position | null = null;
 
   // =========================
   // LIFECYCLE
   // =========================
   async ngAfterViewInit() {
-    await this.initMap();
+    await this.platform.ready();
+  }
 
-    window.addEventListener('resize', this.onResize);
-    window.addEventListener('orientationchange', this.onResize);
-
-    await this.initPositioning();
-
-    if (this.platform.is('android') || this.platform.is('ios')) {
-      this.toastMsg('Para mejor precisión: GPS en alta y sin ahorro de batería.');
+  private async ensurePerms(): Promise<boolean> {
+    try {
+      const perm = await Geolocation.checkPermissions();
+      if (perm.location === 'granted') return true;
+      const req = await Geolocation.requestPermissions();
+      return req.location === 'granted';
+    } catch {
+      return false;
     }
+  }
+
+  async ionViewDidEnter() {
+    this.inView.set(true);
+
+    // 🔒 Blindado: si por cualquier motivo llegué aquí en idle, arranco igual (pero start() debe ser idempotente)
+    try {
+      if (this.trk.stateSig() === 'idle') {
+        await this.trk.start();
+      }
+    } catch {}
+
+    document.body.classList.add('gm-native-page');
+    await this.platform.ready();
+
+    await this.cleanupAll(true);
+    await this.waitForLayout();
+
+    // ✅ permisos robustos
+    const ok = await this.ensurePerms();
+    if (!ok) {
+      await this.toastMsg('Necesitamos permisos de ubicación para registrar.');
+      // vuelve atrás para no quedar en pantalla rota
+      this.router.navigateByUrl('/tabs/registrar');
+      return;
+    }
+
+    // ✅ robusto: obtenemos posición con reintentos + fallback (no revienta la vista)
+    let ll: LonLat = this.lastCenter ?? [-70.6693, -33.4489]; // Santiago fallback
+
+    try {
+      // warmup rápido (no bloquea)
+      Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }).catch(() => null);
+
+      // intento fuerte
+      const p = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      });
+      ll = [p.coords.longitude, p.coords.latitude];
+    } catch {
+      try {
+        // intento más permisivo
+        const p2 = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 60_000,
+        });
+        ll = [p2.coords.longitude, p2.coords.latitude];
+      } catch {
+        // nos quedamos con lastCenter o Santiago
+      }
+    }
+
+    this.lastCenter = ll;
+    this.snapAnchor = ll;
+
+    await this.initMap(ll);
+    await this.ensureUserMarker(ll, 0);
+    await this.kickCamera(ll);
+
+    await this.startDeviceHeading();
+
+    // ✅ watch robusto + cola (evita lag)
+    this.watchId = await Geolocation.watchPosition(
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+      pos => {
+        if (!pos) return;
+        this.enqueuePos(pos);
+      }
+    );
+  }
+
+  ionViewWillLeave() {
+    this.inView.set(false);
+    void this.cleanupAll(false);
+    document.body.classList.remove('gm-native-page');
   }
 
   ngOnDestroy() {
-    if (this.watchId) Geolocation.clearWatch({ id: this.watchId });
-    if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = undefined; }
+    this.inView.set(false);
+    void this.cleanupAll(false);
     this.tickEff.destroy();
+    document.body.classList.remove('gm-native-page');
+  }
 
-    window.removeEventListener('resize', this.onResize);
-    window.removeEventListener('orientationchange', this.onResize);
+  // =========================
+  // POS QUEUE
+  // =========================
+  private enqueuePos(pos: Position) {
+    // siempre dejamos la última (si llegan 10, procesamos 1: la más reciente)
+    this.pendingPos = pos;
+    if (this.posBusy) return;
+    void this.drainPosQueue();
+  }
 
-    if (this.map) {
-      this.map.destroy();
-      this.map = undefined;
+  private async drainPosQueue() {
+    this.posBusy = true;
+    try {
+      while (this.pendingPos) {
+        const p = this.pendingPos;
+        this.pendingPos = null;
+        await this.onPosition(p);
+      }
+    } finally {
+      this.posBusy = false;
     }
   }
 
-  private onResize = () => {
-    setTimeout(() => { /* noop */ }, 150);
-  };
+  // =========================
+  // INIT MAP
+  // =========================
+  private async initMap(center: LonLat) {
+    const rect = this.mapEl.nativeElement.getBoundingClientRect();
+    if (rect.width < 50 || rect.height < 50) {
+      await new Promise(r => setTimeout(r, 150));
+    }
 
-  // =========================
-  // MAP INIT
-  // =========================
-  private async initMap() {
-    // IMPORTANTE:
-    // - En Android/iOS la key vive en strings.xml/Info.plist + meta-data.
-    // - En Web se usa apiKey aquí (pero tú dijiste que web no te importa).
     this.map = await GoogleMap.create({
       id: 'mc_registro_map',
       element: this.mapEl.nativeElement,
       apiKey: environment.googleMapsKey,
       config: {
-        center: { lat: -33.45, lng: -70.66 },
-        zoom: 14,
-        // NO meter props web (disableDefaultUI, zoomControl, etc.) porque rompen el type del plugin
-      }
+        center: { lat: center[1], lng: center[0] },
+        zoom: this.FOLLOW_ZOOM,
+        styles: this.DARK_MAP_STYLE,
+        disableDefaultUI: true,
+        gestureHandling: 'greedy',
+      } as any,
     });
 
     this.mapReady = true;
 
-    // Heurística de “tocó el mapa”
-    try {
-      const el = this.mapEl.nativeElement;
-      el.addEventListener('pointerdown', () => this.userInteracting = true, { passive: true });
-      const end = () => { this.userInteracting = false; };
-      el.addEventListener('pointerup', end, { passive: true });
-      el.addEventListener('pointercancel', end, { passive: true });
-    } catch { /* ignore */ }
+    try { await (this.map as any).setMyLocationEnabled(false); } catch {}
+    try { await (this.map as any).enableCurrentLocation(false); } catch {}
   }
 
-  // =========================
-  // GEOLOCATION
-  // =========================
-  private async initPositioning() {
-    if (!this.map || !this.mapReady) return;
-
-    if (this.watchId) {
-      await Geolocation.clearWatch({ id: this.watchId });
-      this.watchId = undefined;
-    }
-
-    // primer fix (rápido)
+  private async kickCamera(ll: LonLat) {
+    if (!this.map) return;
     try {
-      const p = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 6000,
-        maximumAge: 0
-      });
-
-      const ll: LonLat = [p.coords.longitude, p.coords.latitude];
-      await this.ensureUserMarker(ll, 0);
-
       await this.map.setCamera({
         coordinate: { lat: ll[1], lng: ll[0] },
         zoom: this.FOLLOW_ZOOM,
         bearing: 0,
-        tilt: this.FOLLOW_TILT,
-        animate: false
-      } as any);
-
-      this.firstFixOk = true;
-      this.lastCenter = ll;
-    } catch {
-      // fallback Santiago
-      const ll: LonLat = [-70.66, -33.45];
-      await this.ensureUserMarker(ll, 0);
-
-      await this.map.setCamera({
-        coordinate: { lat: ll[1], lng: ll[0] },
-        zoom: 14,
-        bearing: 0,
-        tilt: 0,
-        animate: false
-      } as any);
-
-      this.firstFixOk = false;
-      this.lastCenter = ll;
-    }
-
-    // watch
-    this.watchId = await Geolocation.watchPosition(
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
-      (pos, err) => this.onPosition(pos ?? undefined, err)
-    );
+        animate: false,
+      });
+    } catch {}
   }
 
-  private async onPosition(pos?: Position, err?: any) {
-    if (!this.map || !this.mapReady) return;
-    if (err || !pos) return;
+  private async waitForLayout() {
+    await new Promise(r => requestAnimationFrame(() => r(true)));
+    await new Promise(r => requestAnimationFrame(() => r(true)));
+    await new Promise(r => setTimeout(r, 90));
+  }
+
+  // =========================
+  // CLEANUP
+  // =========================
+  private async cleanupAll(hard: boolean) {
+    // detener cola
+    this.pendingPos = null;
+    this.posBusy = false;
+
+    if (this.watchId) {
+      try { await Geolocation.clearWatch({ id: this.watchId }); } catch {}
+      this.watchId = undefined;
+    }
+
+    this.stopDeviceHeading();
+    await this.clearPolyline();
+
+    this.userMarkerId = undefined;
+
+    if (this.map) {
+      try { await this.map.destroy(); } catch {}
+      this.map = undefined;
+    }
+
+    this.mapReady = false;
+
+    this.snapBusy = false;
+    this.lastSnapAtMs = 0;
+    this.snapAnchor = null;
+
+    if (hard) {
+      this.emaLat = undefined;
+      this.emaLng = undefined;
+      this.activePath = [];
+      this.lastDrawPoint = null;
+      this.lastBearing = 0;
+    }
+  }
+
+  private async clearPolyline() {
+    if (this.map && this.activeLineId) {
+      try { await (this.map as any).removePolylines([this.activeLineId]); } catch {}
+    }
+    this.activeLineId = undefined;
+    this.activePath = [];
+    this.lastDrawPoint = null;
+  }
+
+  // =========================
+  // GEO UPDATES
+  // =========================
+  private async onPosition(pos: Position) {
+    if (!this.mapReady || !this.map) return;
 
     const { latitude, longitude, speed, accuracy, heading } = pos.coords;
-    const acc = typeof accuracy === 'number' ? accuracy : 9999;
 
-    // filtro por accuracy
-    if (acc > this.IGNORE_ACC) {
-      const llBad: LonLat = [longitude, latitude];
-      await this.ensureUserMarker(llBad, this.lastBearing);
-      return;
-    }
+    const isFirst = !this.lastCenter;
+    if (!isFirst && (accuracy ?? 9999) > this.IGNORE_ACC) return;
 
-    // EMA suave según accuracy
-    const alpha = acc <= 25 ? 0.40 : acc <= 65 ? 0.30 : 0.18;
-    const llSm: LonLat = this.ema(alpha, latitude, longitude);
+    const alpha = (accuracy ?? 9999) <= 25 ? 0.4 : 0.25;
+    const ll = this.ema(alpha, latitude, longitude);
+    const spKmh = (speed ?? 0) * 3.6;
 
-    // velocidad efectiva
-    const spKmh = (typeof speed === 'number' && !Number.isNaN(speed)) ? speed * 3.6 : this.speedKmh();
-
-    // heading fusionado
+    // 1) heading fusion
     this.headingDeg = this.fusedHeading({
-      gpsHeading: (typeof heading === 'number' && !Number.isNaN(heading)) ? heading : null,
+      gpsHeading: heading ?? null,
       prev: this.lastCenter,
-      curr: llSm,
-      spKmh
+      curr: ll,
+      spKmh,
     });
 
-    // alimenta TrackService
-    this.trk.onPosition(
-      latitude,
-      longitude,
-      pos.timestamp || Date.now(),
-      (typeof speed === 'number' && !Number.isNaN(speed)) ? speed : undefined,
-      (typeof accuracy === 'number') ? accuracy : undefined
-    );
+    // 2) marker flecha
+    try { await this.ensureUserMarker(ll, this.headingDeg); } catch {}
 
-    // Auto pausa / reanudar
-    const now = Date.now();
+    // 3) alimentar TrackService SOLO cuando grabas
     if (this.state() === 'recording') {
-      if (spKmh <= this.auto.stopSpeedKmh) {
-        this.stillSince = this.stillSince ?? now;
-        if (now - this.stillSince >= this.auto.stopGraceMs) {
-          this.zone.run(() => {
-            void this.trk.pause();
-            this.pausedAt = this.lastCenter ?? llSm;
-            this.pendingResumeCheck = true;
-          });
-          this.stillSince = this.movingSince = undefined;
-        }
+      this.trk.onPosition(
+        latitude,
+        longitude,
+        pos.timestamp || Date.now(),
+        (typeof speed === 'number' ? speed : undefined),
+        (typeof accuracy === 'number' ? accuracy : undefined),
+      );
+    } else {
+      // si NO grabas, solo UI
+      if (this.state() === 'paused') this.trk.speedKmhSig.set(0);
+      else if (typeof speed === 'number') this.trk.speedKmhSig.set(Math.max(0, speed * 3.6));
+    }
+
+    // 4) polyline VISUAL solo grabando
+    if (this.state() === 'recording') {
+      if (!this.lastDrawPoint) {
+        this.lastDrawPoint = ll;
+        if (this.activePath.length === 0) this.activePath.push(ll);
       } else {
-        this.stillSince = undefined;
-      }
-    } else if (this.state() === 'paused') {
-      if (spKmh >= this.auto.resumeSpeedKmh) {
-        this.movingSince = this.movingSince ?? now;
-        if (now - this.movingSince >= this.auto.resumeGraceMs) {
-          this.zone.run(() => {
-            void this.trk.resume();
-          });
-          this.movingSince = this.stillSince = undefined;
-        }
-      } else {
-        this.movingSince = undefined;
-      }
-    }
+        const d = this.distMeters(this.lastDrawPoint, ll);
+        if (d >= this.TRACE_MIN_METERS && d <= this.MAX_JUMP_METERS) {
+          this.lastDrawPoint = ll;
+          this.activePath.push(ll);
+          if (this.activePath.length > this.TRACE_MAX_POINTS) this.activePath.shift();
 
-    // Corte de segmento si se movió mucho en pausa
-    if (this.pendingResumeCheck && this.state() === 'recording') {
-      this.pendingResumeCheck = false;
-      if (this.pausedAt) {
-        const moved = this.distMetersLL(this.pausedAt, llSm);
-        if (moved > this.GAP_IF_MOVED_OVER_M) {
-          await this.startNewPolylineSegment();
+          try { await this.upsertTrackPolyline(); } catch {}
+          void this.maybeSnapRoads(ll);
         }
       }
-      this.pausedAt = null;
     }
 
-    // Dibujar trazo solo si accuracy aceptable y grabando
-    if (acc <= this.ACCEPT_ACC && this.state() === 'recording') {
-      await this.appendToTrack(llSm);
-    }
+    // 5) cámara follow
+    try { await this.followCamera(ll, { spKmh, prev: this.lastCenter }); } catch {}
 
-    // Marker + follow
-    await this.ensureUserMarker(llSm, this.headingDeg);
-    this.followCamera(llSm, { spKmh, hasHeading: true, prev: this.lastCenter });
-
-    this.lastCenter = llSm;
+    this.lastCenter = ll;
   }
 
   // =========================
-  // TRACK DRAW (POLYLINES)
+  // POLYLINE
   // =========================
-  private async startNewPolylineSegment() {
-    if (!this.map || !this.mapReady) return;
+  private async upsertTrackPolyline() {
+    if (!this.map) return;
+    if (this.activePath.length < 2) return;
 
-    // cierra el segmento actual si existe
+    const path = this.activePath.map(p => ({ lat: p[1], lng: p[0] }));
+
     if (this.activeLineId) {
-      this.segmentLines.push({ id: this.activeLineId, path: this.activePath });
+      try { await (this.map as any).removePolylines([this.activeLineId]); } catch {}
+      this.activeLineId = undefined;
     }
 
-    // ✅ En v7.x: Polyline usa `points` y `strokeWidth`
-    const ids = await this.map.addPolylines([{
-      points: [],
-      strokeColor: '#2b9bff',
-      strokeWidth: 7,
+    const ids = await (this.map as any).addPolylines([{
+      path,
+      color: '#2b9bff',
+      width: 7,
       geodesic: true,
-    } as any]);
+    }]);
 
-    const lineId = Array.isArray(ids) ? ids[0] : (ids as any);
-
-    this.activeLineId = lineId;
-    this.activePath = [];
+    this.activeLineId = ids?.[0];
   }
 
-  private async appendToTrack(ll: LonLat) {
-    if (!this.map || !this.mapReady) return;
+  // =========================
+  // SNAP ROADS
+  // =========================
+  private async maybeSnapRoads(curr: LonLat) {
+    if (this.snapBusy) return;
+    if (this.activePath.length < 8) return;
 
-    if (!this.activeLineId) {
-      await this.startNewPolylineSegment();
-    }
+    const now = Date.now();
+    if (now - this.lastSnapAtMs < this.SNAP_MIN_SECONDS * 1000) return;
 
-    const last = this.activePath[this.activePath.length - 1];
-    if (last) {
-      const d = this.distMetersLL(last, ll);
-      if (d < 1.5) return; // evita jitter
-    }
+    if (!this.snapAnchor) this.snapAnchor = curr;
 
-    this.activePath.push(ll);
+    const dist = this.distMeters(this.snapAnchor, curr);
+    if (dist < this.SNAP_EVERY_METERS) return;
 
-    const lineId = this.activeLineId!;
-    const points = this.activePath.map(p => ({ lat: p[1], lng: p[0] }));
+    const tail = this.activePath.slice(-this.SNAP_TAIL_POINTS);
+    if (tail.length < 2) return;
 
-    // ✅ updatePolyline (si existe) usando points
+    // ✅ blindado para tu env (apiUrl puede venir con /api/v1 incluido)
+    const apiBase = (environment as any).apiUrl ?? '';
+    const url = apiBase
+      ? `${String(apiBase).replace(/\/$/, '')}/roads/snap`
+      : `/roads/snap`;
+
+    this.snapBusy = true;
+    this.lastSnapAtMs = now;
+
     try {
-      await (this.map as any).updatePolyline({
-        id: lineId,
-        points,
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interpolate: true,
+          points: tail.map(p => ({ lat: p[1], lng: p[0] })),
+        }),
       });
+
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+      const snapped: LonLat[] = (data?.points ?? [])
+        .map((p: any) => [Number(p.lng), Number(p.lat)] as LonLat)
+        .filter((p: LonLat) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+      if (snapped.length < 2) return;
+
+      const keep = this.activePath.length - tail.length;
+      this.activePath = [...this.activePath.slice(0, keep), ...snapped];
+
+      await this.upsertTrackPolyline();
+
+      this.snapAnchor = this.activePath[this.activePath.length - 1] ?? curr;
     } catch {
-      // fallback: remove + add
-      try { await this.map.removePolylines([lineId]); } catch {}
-
-      const newIds = await this.map.addPolylines([{
-        points,
-        strokeColor: '#2b9bff',
-        strokeWidth: 7,
-        geodesic: true,
-      } as any]);
-
-      this.activeLineId = Array.isArray(newIds) ? newIds[0] : (newIds as any);
+      // silencioso
+    } finally {
+      this.snapBusy = false;
     }
   }
 
-  // =========================
-  // MARKER + CAMERA
-  // =========================
-  private async ensureUserMarker(ll: LonLat, bearingDeg: number) {
-    if (!this.map || !this.mapReady) return;
+  private distMeters(a: LonLat, b: LonLat): number {
+    const R = 6371000;
+    const dLat = (b[1] - a[1]) * Math.PI / 180;
+    const dLng = (b[0] - a[0]) * Math.PI / 180;
+    const lat1 = a[1] * Math.PI / 180;
+    const lat2 = b[1] * Math.PI / 180;
 
-    const paused = this.state() === 'paused';
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  // =========================
+  // MARKER
+  // =========================
+  private async ensureUserMarker(ll: LonLat, bearing: number) {
+    if (!this.map) return;
+
+    const rot = this.smoothAngle(this.lastBearing, bearing, 0.25);
+    this.lastBearing = rot;
 
     if (!this.userMarkerId) {
       const ids = await this.map.addMarkers([{
         coordinate: { lat: ll[1], lng: ll[0] },
-        title: 'Tú',
-        // estas props pueden variar por versión, por eso any
-        rotation: bearingDeg,
+        iconUrl: this.NAV_ICON_URL,
+        iconSize: { width: this.NAV_ICON_SIZE, height: this.NAV_ICON_SIZE },
         anchor: { x: 0.5, y: 0.5 },
-        tintColor: paused ? '#ffb703' : '#00d2ff',
+        rotation: rot,
       } as any]);
 
-      this.userMarkerId = Array.isArray(ids) ? ids[0] : (ids as any);
+      this.userMarkerId = ids?.[0];
     } else {
-      const id = this.userMarkerId;
-      try {
-        await (this.map as any).updateMarker({
-          id,
-          coordinate: { lat: ll[1], lng: ll[0] },
-          rotation: bearingDeg,
-          tintColor: paused ? '#ffb703' : '#00d2ff',
-        });
-      } catch {
-        try { await this.map.removeMarkers([id]); } catch {}
-        this.userMarkerId = undefined;
-        await this.ensureUserMarker(ll, bearingDeg);
-      }
+      await (this.map as any).updateMarker({
+        id: this.userMarkerId,
+        coordinate: { lat: ll[1], lng: ll[0] },
+        rotation: rot,
+      });
     }
   }
 
+  // =========================
+  // CAMERA FOLLOW
+  // =========================
   private async followCamera(center: LonLat, info?: FollowInfo) {
-    if (!this.map || !this.mapReady) return;
-    if (!this.animFollow) return;
-    if (this.userInteracting) return;
-
-    let bearing = this.lastBearing;
+    if (!this.map) return;
 
     const sp = info?.spKmh ?? 0;
-    if (sp >= this.MOVE_MIN_KMH && info?.prev) {
-      bearing = this.bearing(info.prev, center);
-    } else if (typeof this.headingDeg === 'number' && !Number.isNaN(this.headingDeg)) {
-      bearing = this.headingDeg;
+    if (sp < this.MOVE_MIN_KMH) {
+      await this.map.setCamera({
+        coordinate: { lat: center[1], lng: center[0] },
+        zoom: this.FOLLOW_ZOOM,
+        bearing: this.lastBearing,
+        animate: false,
+      });
+      return;
     }
 
-    bearing = this.smoothAngle(this.lastBearing, bearing, 0.20);
-    this.lastBearing = bearing;
+    const OFFSET_M = 14;
+    const rad = this.lastBearing * Math.PI / 180;
+    const dLat = (OFFSET_M / 6371000) * Math.cos(rad);
+    const dLng = (OFFSET_M / 6371000) * Math.sin(rad) / Math.cos(center[1] * Math.PI / 180);
 
     await this.map.setCamera({
-      coordinate: { lat: center[1], lng: center[0] },
+      coordinate: {
+        lat: center[1] + dLat * 180 / Math.PI,
+        lng: center[0] + dLng * 180 / Math.PI,
+      },
       zoom: this.FOLLOW_ZOOM,
-      tilt: this.FOLLOW_TILT,
-      bearing,
+      bearing: this.lastBearing,
       animate: true,
-    } as any);
+    });
+  }
+
+  // =========================
+  // DEVICE HEADING
+  // =========================
+  private async startDeviceHeading() {
+    try {
+      const anyDO = DeviceOrientationEvent as any;
+      if (anyDO?.requestPermission) {
+        const res = await anyDO.requestPermission();
+        if (res !== 'granted') return;
+      }
+    } catch {}
+
+    this.orientationHandler = (ev: DeviceOrientationEvent) => {
+      const w = ev as any;
+      let heading: number | null = null;
+
+      if (typeof w.webkitCompassHeading === 'number') {
+        heading = w.webkitCompassHeading;
+      } else if (typeof ev.alpha === 'number') {
+        heading = 360 - ev.alpha;
+      }
+
+      if (heading === null) return;
+      this.deviceHeadingDeg = this.normalizeDeg(heading);
+      this.deviceHeadingOk = true;
+    };
+
+    window.addEventListener('deviceorientation', this.orientationHandler, { passive: true });
+  }
+
+  private stopDeviceHeading() {
+    if (this.orientationHandler) {
+      window.removeEventListener('deviceorientation', this.orientationHandler);
+      this.orientationHandler = undefined;
+    }
+    this.deviceHeadingDeg = null;
+    this.deviceHeadingOk = false;
+  }
+
+  // =========================
+  // HEADING FUSION
+  // =========================
+  private fusedHeading(params: {
+    gpsHeading: number | null;
+    prev: LonLat | null | undefined;
+    curr: LonLat;
+    spKmh: number;
+  }): number {
+    const { gpsHeading, prev, curr, spKmh } = params;
+
+    if (
+      spKmh < this.MOVE_MIN_KMH &&
+      this.deviceHeadingOk &&
+      this.deviceHeadingDeg !== null
+    ) {
+      return this.smoothAngle(this.lastBearing, this.deviceHeadingDeg, 0.18);
+    }
+
+    if (spKmh >= this.MOVE_MIN_KMH && prev) {
+      const moveBear = this.bearing(prev, curr);
+      return this.smoothAngle(this.lastBearing, moveBear, 0.25);
+    }
+
+    if (gpsHeading !== null) {
+      return this.smoothAngle(this.lastBearing, gpsHeading, 0.18);
+    }
+
+    return this.lastBearing;
   }
 
   // =========================
@@ -469,81 +698,85 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     const ll = this.lastCenter;
     if (!ll) return;
 
-    this.userInteracting = false;
-    await this.map.setCamera({
-      coordinate: { lat: ll[1], lng: ll[0] },
-      zoom: this.FOLLOW_ZOOM,
-      tilt: this.FOLLOW_TILT,
-      bearing: this.lastBearing,
-      animate: true,
-    } as any);
+    try {
+      await this.map.setCamera({
+        coordinate: { lat: ll[1], lng: ll[0] },
+        zoom: this.FOLLOW_ZOOM,
+        bearing: this.lastBearing,
+        animate: true,
+      });
+    } catch {}
   }
 
   pauseOrResume() {
-    if (this.state() === 'recording') {
-      this.zone.run(() => {
-        void this.trk.pause();
-        this.pausedAt = this.lastCenter;
-        this.pendingResumeCheck = true;
-      });
-    } else if (this.state() === 'paused') {
+    const st = this.state();
+
+    if (st === 'recording') {
+      this.zone.run(() => void this.trk.pause());
+      return;
+    }
+
+    if (st === 'paused') {
       this.zone.run(() => void this.trk.resume());
     }
   }
 
   async finalizar() {
     const { durationMs, distanceKm, avgSpeedKmh } = this.trk.getSummary();
+
     const modal = await this.modalCtrl.create({
       component: FinishConfirmModal,
-      componentProps: { duration: this.msToHMS(durationMs), distanceKm, avgSpeedKmh },
+      componentProps: {
+        duration: this.msToHMS(durationMs),
+        distanceKm,
+        avgSpeedKmh,
+      },
       breakpoints: [0, 0.6, 0.9],
       initialBreakpoint: 0.6,
-      showBackdrop: true
+      showBackdrop: true,
     });
+
     await modal.present();
 
     const { role } = await modal.onWillDismiss<{ save: boolean }>();
-    if (role === 'save' || role === 'discard') this.closeAndFinalize(role === 'save');
+    if (role === 'save' || role === 'discard') {
+      this.closeAndFinalize(role === 'save');
+    }
   }
 
   private closeAndFinalize(save: boolean) {
-    if (this.watchId) { Geolocation.clearWatch({ id: this.watchId }); this.watchId = undefined; }
+    if (this.watchId) {
+      try { Geolocation.clearWatch({ id: this.watchId }); } catch {}
+      this.watchId = undefined;
+    }
+
     const { saved } = this.trk.finalize(save);
-    if (save && saved) this.toastMsg('Actividad guardada');
+    if (save && saved) void this.toastMsg('Actividad guardada');
+
+    void this.clearPolyline();
     this.router.navigateByUrl('/tabs/registrar');
   }
 
-  // =========================
-  // HEADING / MATH HELPERS
-  // =========================
-  private fusedHeading(params: {
-    gpsHeading: number | null;
-    prev: LonLat | null | undefined;
-    curr: LonLat;
-    spKmh: number;
-  }): number {
-    const { gpsHeading, prev, curr, spKmh } = params;
-
-    if (spKmh >= this.MOVE_MIN_KMH && prev) {
-      const moveBear = this.bearing(prev, curr);
-      const base = (typeof this.lastBearing === 'number') ? this.lastBearing : moveBear;
-      const a = Math.max(0.15, Math.min(0.45, spKmh / 20));
-      const fused = this.smoothAngle(base, moveBear, a);
-      this.lastBearing = fused;
-      return fused;
-    }
-
-    if (typeof gpsHeading === 'number' && !Number.isNaN(gpsHeading)) {
-      const comp = this.normalizeDeg(gpsHeading);
-      const base = (typeof this.lastBearing === 'number') ? this.lastBearing : comp;
-      const fused = this.smoothAngle(base, comp, 0.18);
-      this.lastBearing = fused;
-      return fused;
-    }
-
-    return this.lastBearing || 0;
+  private async toastMsg(message: string) {
+    const t = await this.toast.create({
+      message,
+      duration: 1800,
+      position: 'bottom',
+    });
+    await t.present();
   }
 
+  private msToHMS(ms: number) {
+    const s = Math.floor(ms / 1000);
+    const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  // =========================
+  // MATH
+  // =========================
   private normalizeDeg(d: number): number {
     return (d % 360 + 360) % 360;
   }
@@ -556,38 +789,15 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   }
 
   private smoothAngle(prev: number, next: number, alpha: number): number {
-    const d = this.angleDelta(prev, next);
-    return this.normalizeDeg(prev + d * alpha);
-  }
-
-  private distMetersLL(a: LonLat, b: LonLat): number {
-    const R = 6371000;
-    const dLat = (b[1] - a[1]) * Math.PI / 180;
-    const dLng = (b[0] - a[0]) * Math.PI / 180;
-    const s1 = Math.sin(dLat / 2);
-    const s2 = Math.sin(dLng / 2);
-    const t = s1 * s1 + Math.cos(a[1] * Math.PI / 180) * Math.cos(b[1] * Math.PI / 180) * s2 * s2;
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(t)));
+    return this.normalizeDeg(prev + this.angleDelta(prev, next) * alpha);
   }
 
   private bearing(a: LonLat, b: LonLat): number {
     const [lng1, lat1] = [a[0] * Math.PI / 180, a[1] * Math.PI / 180];
     const [lng2, lat2] = [b[0] * Math.PI / 180, b[1] * Math.PI / 180];
     const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
+    const x = Math.cos(lat1) * Math.sin(lat2)
+      - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-  }
-
-  private async toastMsg(message: string) {
-    const t = await this.toast.create({ message, duration: 1800, position: 'bottom' });
-    await t.present();
-  }
-
-  private msToHMS(ms: number) {
-    const s = Math.floor(ms / 1000);
-    const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-    const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-    const ss = String(s % 60).padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
   }
 }
