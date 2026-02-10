@@ -12,6 +12,9 @@ const PERSIST_EVERY_MS = 5000;
 // ✅ Umbral de precisión aceptable (m) — 65 era MUY agresivo en ciudad
 const MAX_ACCURACY_M = 200;
 
+type LonLat = [number, number];
+type LastFix = { ll: LonLat; acc: number | null; at: number };
+
 export type TrackState = 'idle' | 'recording' | 'paused';
 
 export interface TrackPoint { lat: number; lng: number; ts: number; speed?: number; acc?: number; }
@@ -435,4 +438,18 @@ export class TrackService {
       this.pendingBatch.unshift(...batch);
     }
   }
+
+  lastFixSig = signal<LastFix | null>(null);
+
+  setLastFix(ll: LonLat, acc: number | null = null) {
+    this.lastFixSig.set({ ll, acc, at: Date.now() });
+  }
+
+  getFreshLastFix(maxAgeMs = 15000): LastFix | null {
+    const f = this.lastFixSig();
+    if (!f) return null;
+    if (Date.now() - f.at > maxAgeMs) return null;
+    return f;
+  }
+
 }

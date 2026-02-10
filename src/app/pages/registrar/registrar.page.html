@@ -19,11 +19,57 @@
         </ion-fab-button>
       </ion-fab>
 
+      <!-- ✅ Mini resumen SOLO si hay recorrido activo -->
+      <div class="mini-resumen" *ngIf="hasActive()">
+        <div class="mini-resumen__top">
+          <span class="pill" [class.pill--paused]="isPaused()">
+            <span class="dot" [class.dot--paused]="isPaused()"></span>
+            {{ statusLabel() }}
+          </span>
+
+          <span class="time">
+            ⏱ {{ activeTimeStr() }}
+          </span>
+        </div>
+
+        <div class="mini-resumen__metrics">
+          <div class="metric">
+            <div class="metric__label">Distancia</div>
+            <div class="metric__value">{{ distanceKmStr() }}</div>
+          </div>
+
+          <div class="metric">
+            <div class="metric__label">Velocidad</div>
+            <div class="metric__value">{{ speedKmhStr() }}</div>
+          </div>
+        </div>
+      </div>
+
       <div class="card-body">
         <h3>¿Listo para salir?</h3>
         <p>Inicia el registro para ver tu posición en el mapa y tus métricas en tiempo real.</p>
 
-        <ion-button expand="block" size="large" shape="round" color="success" (click)="onStart()">
+        <!-- ✅ Si hay recorrido activo (recording/paused), mostramos "volver" -->
+        <ion-button
+          *ngIf="hasActive()"
+          expand="block"
+          size="large"
+          shape="round"
+          color="tertiary"
+          (click)="goToActive()"
+          [disabled]="starting">
+          VOLVER AL RECORRIDO ACTIVO
+        </ion-button>
+
+        <!-- ✅ Si está idle, mostramos iniciar -->
+        <ion-button
+          *ngIf="!hasActive()"
+          expand="block"
+          size="large"
+          shape="round"
+          color="success"
+          (click)="onStart()"
+          [disabled]="starting">
           INICIAR
         </ion-button>
       </div>

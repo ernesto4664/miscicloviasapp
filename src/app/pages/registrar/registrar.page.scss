@@ -1,37 +1,161 @@
-@import "mapbox-gl/dist/mapbox-gl.css";
+:host {
+  display: block;
+}
 
-:host { display: block; }
+/* Contenedor principal */
+.starter {
+  padding: 12px;
+  padding-bottom: 22px; /* aire extra por tabbar */
+}
 
-.starter { padding: 12px; }
-
+/* Card base */
 .card {
+  position: relative; /* ✅ clave para que el FAB quede relativo */
   background: #fff;
   border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   overflow: hidden;
 }
 
-.map-card {
-  position: relative;
-}
-
+/* Mini map preview */
 .mini-map {
   width: 100%;
-  height: 390px;        /* ajusta a 220–260 si lo prefieres */
-  background: #f2f4f7;  /* placeholder si no hay mapa */
-  border-bottom: 1px solid rgba(0,0,0,.06);
+  height: 390px;        /* si quieres más chico: 240–300 */
+  background: #f2f4f7;  /* placeholder si el mapa tarda */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
+/* FAB del preview: centrado / locate */
 .mini-fab {
   position: absolute;
-  right: 15px;
-  top: 5pc;
-  z-index: 1000; // por encima del mapa
+  right: 14px;
+  top: 14px;         /* ✅ antes tenías 5pc (raro), esto es estable */
+  
 }
 
-.card-body { padding: 12px; }
-.card-body h3 { margin: 8px 0 6px; font-size: 1rem; }
-.card-body p { margin: 0 0 12px; color: #555; }
+/* Botón FAB un poquito más “pro” */
+.mini-fab ion-fab-button {
+  --box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+  --border-radius: 999px;
+}
 
-/* un poco más de aire para que no choque con el tabbar */
+/* Body / texto */
+.card-body {
+  padding: 12px;
+}
 
+.card-body h3 {
+  margin: 8px 0 6px;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.card-body p {
+  margin: 0 0 12px;
+  color: #555;
+  line-height: 1.3;
+}
+
+/* ✅ Mini resumen (solo aparece cuando hay recorrido activo) */
+.mini-resumen {
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+
+  /* Se ve encima del mapa blanco sin ensuciar */
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* Header de resumen: pill + tiempo */
+.mini-resumen__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Estado: Grabando / Pausado */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+
+  background: rgba(43, 155, 255, 0.22);
+  border: 1px solid rgba(43, 155, 255, 0.35);
+}
+
+.pill--paused {
+  background: rgba(255, 193, 7, 0.18);
+  border: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+/* Dot del estado */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2b9bff;
+  box-shadow: 0 0 0 3px rgba(43, 155, 255, 0.18);
+}
+
+.dot--paused {
+  background: #ffc107;
+  box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.18);
+}
+
+/* Tiempo */
+.time {
+  font-weight: 800;
+  font-size: 13px;
+  opacity: 0.95;
+  white-space: nowrap;
+}
+
+/* Métricas */
+.mini-resumen__metrics {
+  display: flex;
+  gap: 10px;
+}
+
+.metric {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.metric__label {
+  font-size: 12px;
+  opacity: 0.78;
+  margin-bottom: 4px;
+}
+
+.metric__value {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+/* Responsive: en pantallas pequeñas que no se apriete */
+@media (max-width: 360px) {
+  .mini-map { height: 330px; }
+  .metric__value { font-size: 15px; }
+}
+
+/* Un poco más de aire para que no choque con el tabbar */
+ion-content {
+  --padding-bottom: 14px;
+}

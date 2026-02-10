@@ -5,11 +5,9 @@
 </ion-header>
 
 <ion-content
-  class="map-screen page-dark"
-  fullscreen="true"
+  class="map-screen page-dark"y
   [scrollY]="false"
 >
-
   <!-- ================= MAPA ================= -->
   <div class="map-full">
     <div #mapEl class="map-el"></div>
@@ -18,12 +16,12 @@
   <!-- ===== Re-centrar navegación ===== -->
   <ion-fab vertical="top" horizontal="end" slot="fixed">
     <ion-fab-button size="small" (click)="center()">
-      <ion-icon name="navigate-outline"></ion-icon>
+      <ion-icon name="locate-outline"></ion-icon>
     </ion-fab-button>
   </ion-fab>
 
   <!-- ================= HUD ================= -->
-  <div class="hud" id="regHud">
+  <div class="hud" id="regHud" #hudEl>
 
     <!-- Estado -->
     <div class="status">
@@ -60,37 +58,22 @@
 
     <!-- Grabando -->
     <div class="actions-row" *ngIf="state() === 'recording'">
-      <ion-button
-        class="action-btn btn-neutral"
-        (click)="pauseOrResume()"
-      >
+      <ion-button class="action-btn btn-neutral" (click)="pauseOrResume()">
         Pausar
       </ion-button>
 
-      <ion-button
-        class="action-btn"
-        color="danger"
-        (click)="finalizar()"
-      >
+      <ion-button class="action-btn" color="danger" (click)="finalizar()">
         Finalizar
       </ion-button>
     </div>
 
     <!-- Pausado -->
     <div class="actions-row" *ngIf="state() === 'paused'">
-      <ion-button
-        class="action-btn"
-        color="success"
-        (click)="pauseOrResume()"
-      >
+      <ion-button class="action-btn" color="success" (click)="pauseOrResume()">
         Reanudar
       </ion-button>
 
-      <ion-button
-        class="action-btn"
-        color="danger"
-        (click)="finalizar()"
-      >
+      <ion-button class="action-btn" color="danger" (click)="finalizar()">
         Finalizar
       </ion-button>
     </div>
