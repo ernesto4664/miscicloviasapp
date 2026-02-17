@@ -1,7 +1,15 @@
-import { Component, OnInit, OnDestroy, AfterViewInit, inject, ElementRef, ViewChild } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  AfterViewInit,
+  inject,
+  ElementRef,
+  ViewChild,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import * as L from 'leaflet';
-import { forkJoin, from, fromEvent, of, Subscription, timer } from 'rxjs';
+import { forkJoin, fromEvent, of, Subscription, timer } from 'rxjs';
 import { catchError, mapTo, switchMap, tap } from 'rxjs/operators';
 import { CicloviasService, GeoJsonFC } from '../../core/services/ciclovias.service';
 import { CierresService, Cierre } from '../../core/services/cierres.service';
@@ -9,13 +17,12 @@ import { ViasService } from '../../core/services/vias.service';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 
-
 // Fix iconos Leaflet (rutas desde assets/)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'assets/leaflet/marker-icon-2x.png',
-  iconUrl:       'assets/leaflet/marker-icon.png',
-  shadowUrl:     'assets/leaflet/marker-shadow.png',
+  iconUrl: 'assets/leaflet/marker-icon.png',
+  shadowUrl: 'assets/leaflet/marker-shadow.png',
 });
 
 @Component({
@@ -65,6 +72,9 @@ export class MapaCicloviasComponent implements OnInit, AfterViewInit, OnDestroy 
   private resizeSub?: Subscription;
   private pollSub?: Subscription;
 
+  // evita recalcular fitBounds (caro) cada vez que se re-renderiza
+  private didFitBounds = false;
+
   ngOnInit() {}
 
   ngAfterViewInit() {
@@ -80,11 +90,7 @@ export class MapaCicloviasComponent implements OnInit, AfterViewInit, OnDestroy 
 
     this.centerOnUser();
     this.loadBases();
-
-    // 🔁 refresco automático: arranca inmediato y luego cada 10s
-    this.pollSub = timer(0, 10000).pipe(
-      switchMap(() => this.refreshCierres())
-    ).subscribe();
+    // ✅ OJO: el poll ahora se inicia dentro de loadBases() cuando las bases ya estén listas
   }
 
   ngOnDestroy() {
@@ -125,30 +131,41 @@ export class MapaCicloviasComponent implements OnInit, AfterViewInit, OnDestroy 
     } catch {/* noop */}
   }
 
-    private loadBases() {
-    const cic$  = from(this.cicSrv.getBase()).pipe(
-        tap((fc: GeoJsonFC) => this.renderBaseCiclovias(fc)),
-        mapTo(true),
-        catchError(e => { console.error('[Mapa] base ciclovías', e); return of(false); })
+  /** Carga bases usando los nuevos servicios cacheados (Observables shareReplay). */
+  private loadBases() {
+    const cic$ = this.cicSrv.getBase$().pipe(
+      tap((fc: GeoJsonFC) => this.renderBaseCiclovias(fc)),
+      mapTo(true),
+      catchError(e => { console.error('[Mapa] base ciclovías', e); return of(false); })
     );
 
-    const vias$ = from(this.viasSrv.getBase()).pipe(
-        tap((fc: any) => this.renderBaseVias(fc)),
-        mapTo(true),
-        catchError(e => { console.error('[Mapa] base vías', e); return of(false); })
+    const vias$ = this.viasSrv.getBase$().pipe(
+      tap((fc: any) => this.renderBaseVias(fc)),
+      mapTo(true),
+      catchError(e => { console.error('[Mapa] base vías', e); return of(false); })
     );
 
     forkJoin([cic$, vias$]).subscribe(([okCic, okVias]) => {
-        if (okCic && okVias) this.refreshCierres().subscribe();
+      if (!okCic || !okVias) return;
+
+      // 1) primer refresh
+      this.refreshCierres().subscribe();
+
+      // 2) poll cada 10s (sin el tick inmediato 0 para no duplicar con el refresh anterior)
+      this.pollSub?.unsubscribe();
+      this.pollSub = timer(10000, 10000).pipe(
+        switchMap(() => this.refreshCierres())
+      ).subscribe();
     });
-    }
+  }
 
   private renderBaseCiclovias(fc: GeoJsonFC) {
     this.baseCic?.remove();
+
     this.baseCic = L.geoJSON(fc as any, {
       pane: 'base',
-      style: (f:any) => this.styleCiclovia(f),
-      onEachFeature: (f:any, layer:any) => {
+      style: (f: any) => this.styleCiclovia(f),
+      onEachFeature: (f: any, layer: any) => {
         const p = f.properties ?? {};
         const title = p.EJE_VIA ?? p.NOM_PROYECTO ?? 'Ciclovía';
         const comuna = p.COMUNA ? `<br><small>${p.COMUNA}</small>` : '';
@@ -156,64 +173,74 @@ export class MapaCicloviasComponent implements OnInit, AfterViewInit, OnDestroy 
       }
     }).addTo(this.map);
 
-    const b = this.baseCic.getBounds();
-    if (b.isValid()) this.map.fitBounds(b, { padding: [20,20] });
+    // ✅ fitBounds solo una vez (esto en móvil ayuda)
+    if (!this.didFitBounds) {
+      const b = this.baseCic.getBounds();
+      if (b.isValid()) {
+        this.didFitBounds = true;
+        this.map.fitBounds(b, { padding: [20, 20] });
+      }
+    }
   }
 
   private renderBaseVias(fc: any) {
     this.baseVias?.remove();
     this.baseVias = L.geoJSON(fc as any, {
       pane: 'base-vias',
-      style: (f:any) => {
-        const fid = String(f.properties?.osm_id ?? f.properties?.id ?? f.id ?? '');
-        const closed = fid && this.closedViaIds.has(fid);
-        return { color: '#ff6f00', weight: closed ? 6 : 0, opacity: closed ? 0.95 : 0 };
-      }
+      style: (f: any) => this.styleVia(f)
     }).addTo(this.map);
   }
 
-  private styleCiclovia(f:any): L.PathOptions {
+  private styleCiclovia(f: any): L.PathOptions {
     const fid = String(f.properties?.id ?? f.properties?.OBJECTID ?? f.id ?? '');
     const closed = fid && this.closedCicIds.has(fid);
     return { color: closed ? '#d32f2f' : '#2e7d32', weight: closed ? 5 : 4, opacity: 1 };
+  }
+
+  private styleVia(f: any): L.PathOptions {
+    const fid = String(f.properties?.osm_id ?? f.properties?.id ?? f.id ?? '');
+    const closed = fid && this.closedViaIds.has(fid);
+    return { color: '#ff6f00', weight: closed ? 6 : 0, opacity: closed ? 0.95 : 0 };
   }
 
   /** Trae cierres activos (target: ciclovia/via), re-estila y pinta overlays. */
   private refreshCierres() {
     return forkJoin([
       // CICLOVÍAS
-      this.cierSrv.getCierresActivos('ciclovia').pipe(tap((items:Cierre[]) => {
-        console.log('[Mapa] cierres ciclovía activos:', items.length);
-        // set para estilar base
-        this.closedCicIds = new Set(
-          items.map(c => String(c.feature_id ?? '')).filter(Boolean)
-        );
-        // reestilo base
-        this.baseCic?.eachLayer((l:any) => {
-          const f = l?.feature; if (f) (l as L.Path).setStyle(this.styleCiclovia(f));
-        });
-        // overlay punteado
-        this.overlayCic?.remove();
-        this.overlayCic = this.drawOverlay(items, 'closures', '#d32f2f');
-      })),
+      this.cierSrv.getCierresActivos('ciclovia').pipe(
+        tap((items: Cierre[]) => {
+          console.log('[Mapa] cierres ciclovía activos:', items.length);
+
+          this.closedCicIds = new Set(
+            items.map(c => String(c.feature_id ?? '')).filter(Boolean)
+          );
+
+          // ✅ reestilo SIN eachLayer (mucho más barato)
+          this.baseCic?.setStyle((f: any) => this.styleCiclovia(f));
+
+          // overlay punteado
+          this.overlayCic?.remove();
+          this.overlayCic = this.drawOverlay(items, 'closures', '#d32f2f');
+        })
+      ),
 
       // VÍAS
-      this.cierSrv.getCierresActivos('via').pipe(tap((items:Cierre[]) => {
-        console.log('[Mapa] cierres vías activos:', items.length);
-        this.closedViaIds = new Set(
-          items.map(c => String(c.feature_id ?? '')).filter(Boolean)
-        );
-        // reestilo base
-        this.baseVias?.eachLayer((l:any) => {
-          const f = l?.feature; if (!f) return;
-          const fid = String(f.properties?.osm_id ?? f.properties?.id ?? f.id ?? '');
-          const closed = fid && this.closedViaIds.has(fid);
-          (l as L.Path).setStyle({ color:'#ff6f00', weight: closed ? 6 : 0, opacity: closed ? 0.95 : 0 });
-        });
-        // overlay punteado
-        this.overlayVias?.remove();
-        this.overlayVias = this.drawOverlay(items, 'closures-vias', '#ff6f00');
-      }))
+      this.cierSrv.getCierresActivos('via').pipe(
+        tap((items: Cierre[]) => {
+          console.log('[Mapa] cierres vías activos:', items.length);
+
+          this.closedViaIds = new Set(
+            items.map(c => String(c.feature_id ?? '')).filter(Boolean)
+          );
+
+          // ✅ reestilo SIN eachLayer (mucho más barato)
+          this.baseVias?.setStyle((f: any) => this.styleVia(f));
+
+          // overlay punteado
+          this.overlayVias?.remove();
+          this.overlayVias = this.drawOverlay(items, 'closures-vias', '#ff6f00');
+        })
+      )
     ]).pipe(mapTo(void 0));
   }
 

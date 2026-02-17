@@ -202,7 +202,7 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private readonly TRACE_MIN_METERS_BASE = 2.2;
   private readonly TRACE_MAX_POINTS = 7000;
   private lastDrawPoint: LonLat | null = null;
-  private readonly MAX_JUMP_METERS = 80;
+  private readonly MAX_JUMP_METERS = 130;
 
   private polyBusy = false;
   private lastPolyAt = 0;
@@ -212,8 +212,8 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private readonly SIMPLIFY_EPS_MIN_M = 1.8;
   private readonly SIMPLIFY_EPS_MAX_M = 6.0;
 
-  private readonly TRACE_WIDTH_MAIN = 10;
-  private readonly TRACE_WIDTH_OUTLINE = 14;
+  private readonly TRACE_WIDTH_MAIN = 14;
+  private readonly TRACE_WIDTH_OUTLINE = 22;
   private readonly TRACE_COLOR_MAIN = '#2b9bff';
   private readonly TRACE_COLOR_OUTLINE = '#0b1220';
 
@@ -225,9 +225,9 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private snapAnchor: LonLat | null = null;
 
   // ✅ antes: 250m / 12s
-  private readonly SNAP_EVERY_METERS = 60;
-  private readonly SNAP_MIN_SECONDS = 4;
-  private readonly SNAP_TAIL_POINTS = 80;
+  private readonly SNAP_EVERY_METERS = 40;
+  private readonly SNAP_MIN_SECONDS = 3;
+  private readonly SNAP_TAIL_POINTS = 110;
 
   // =========================
   // MAP STYLE
@@ -269,7 +269,8 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   // POS QUEUE
   // =========================
   private posBusy = false;
-  private pendingPos: Position | null = null;
+  private pendingPosQ: Position[] = [];
+  private readonly POS_Q_MAX = 25;
 
   // =========================
   // CAMERA THROTTLE
@@ -615,7 +616,14 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   // ============================================================
   private enqueuePos(pos: Position) {
     if (!this.trackingActive) return;
-    this.pendingPos = pos;
+
+    this.pendingPosQ.push(pos);
+
+    // cap: si el GPS manda demasiado rápido, no acumulamos infinito
+    if (this.pendingPosQ.length > this.POS_Q_MAX) {
+      this.pendingPosQ.shift();
+    }
+
     if (this.posBusy) return;
     void this.drainPosQueue();
   }
@@ -623,10 +631,9 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private async drainPosQueue() {
     this.posBusy = true;
     try {
-      while (this.pendingPos) {
+      while (this.pendingPosQ.length) {
         if (!this.trackingActive) break;
-        const p = this.pendingPos;
-        this.pendingPos = null;
+        const p = this.pendingPosQ.shift()!;
         await this.onPosition(p);
       }
     } finally {
@@ -772,7 +779,7 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   // CLEANUP
   // ============================================================
   private async cleanupAll(hard: boolean) {
-    this.pendingPos = null;
+    this.pendingPosQ = [];
     this.posBusy = false;
 
     this.stopHeartbeat();
@@ -853,6 +860,8 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     this.activeLineIdsMain = new Array(this.activeSegments.length).fill('');
     this.activeLineIdsOutline = new Array(this.activeSegments.length).fill('');
 
+    const anyMap = this.map as any;
+
     for (let i = 0; i < this.activeSegments.length; i++) {
       const seg = this.activeSegments[i];
       if (!seg || seg.length < 2) continue;
@@ -860,19 +869,19 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       const { path, epsM } = this.preparePathForDraw(seg, this.speedKmh(), null);
       if (path.length < 2) continue;
 
-      const idsOutline = await (this.map as any).addPolylines([{
+      const idsOutline = await anyMap.addPolylines([{
         path,
         strokeColor: this.TRACE_COLOR_OUTLINE,
         strokeWidth: this.TRACE_WIDTH_OUTLINE,
-        geodesic: false, // ✅
+        geodesic: false,
         zIndex: 1,
       }]);
 
-      const idsMain = await (this.map as any).addPolylines([{
+      const idsMain = await anyMap.addPolylines([{
         path,
         strokeColor: this.TRACE_COLOR_MAIN,
         strokeWidth: this.TRACE_WIDTH_MAIN,
-        geodesic: false, // ✅
+        geodesic: false,
         zIndex: 2,
       }]);
 
@@ -892,26 +901,37 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
 
     const { latitude, longitude, speed, accuracy, heading } = pos.coords;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-    if ((accuracy ?? 9999) > this.IGNORE_ACC) return;
 
-    const alpha = (accuracy ?? 9999) <= 25 ? 0.4 : 0.25;
-    const ll = this.ema(alpha, latitude, longitude);
+    const accM = (typeof accuracy === 'number' ? accuracy : null);
+    if ((accM ?? 9999) > this.IGNORE_ACC) return;
+
+    // RAW para dibujo / snap
+    const llRaw: LonLat = [longitude, latitude];
+
+    // Smooth solo para UI (marker/cámara)
+    let alpha = 0.45;
+    if ((accM ?? 9999) > 20) alpha = 0.35;
+    if ((accM ?? 9999) > 35) alpha = 0.28;
+    if ((accM ?? 9999) > 60) alpha = 0.22;
+
+    const llSmooth = this.ema(alpha, latitude, longitude);
     const spKmh = (speed ?? 0) * 3.6;
 
+    // Heading
     this.manageCompassAdaptive(spKmh);
-
-    const moveBear = this.computeMoveBearingStable(ll);
+    const moveBear = this.computeMoveBearingStable(llSmooth);
     this.headingDeg = this.fusedHeading({
       gpsHeading: typeof heading === 'number' ? heading : null,
       moveBearing: moveBear,
       spKmh,
     });
 
+    // Marker (SMOOTH)
     if (!this.USE_NATIVE_LOCATION_DOT) {
-      void this.ensureUserMarker(ll, this.headingDeg).catch(() => {});
+      void this.ensureUserMarker(llSmooth, this.headingDeg).catch(() => {});
     }
 
-    // TrackService
+    // TrackService (RAW)
     if (this.state() === 'recording') {
       this.trk.onPosition(
         latitude,
@@ -925,39 +945,57 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       else if (typeof speed === 'number') this.trk.speedKmhSig.set(Math.max(0, speed * 3.6));
     }
 
-    // Polyline
+    // Polyline (RAW + gate anti-drift)
     if (this.state() === 'recording') {
-      const segIndex = this.activeSegments.length - 1;
-      const seg = this.activeSegments[segIndex];
+      if (this.shouldAcceptForTrace(spKmh, accM)) {
+        const segIndex = this.activeSegments.length - 1;
+        const seg = this.activeSegments[segIndex];
 
-      if (!this.lastDrawPoint) {
-        this.lastDrawPoint = ll;
-        if (seg.length === 0) seg.push(ll);
-      } else {
-        const d = this.distMeters(this.lastDrawPoint, ll);
-
-        if (d > this.MAX_JUMP_METERS) {
-          this.activeSegments.push([ll]);
-          this.activeLineIdsMain.push('');
-          this.activeLineIdsOutline.push('');
-          this.lastDrawPoint = ll;
+        if (!this.lastDrawPoint) {
+          this.lastDrawPoint = llRaw;
+          if (seg.length === 0) seg.push(llRaw);
         } else {
-          const minDist = this.dynamicTraceMinMeters(spKmh, accuracy ?? null);
-          if (d >= minDist) {
-            this.lastDrawPoint = ll;
-            seg.push(ll);
+          const d = this.distMeters(this.lastDrawPoint, llRaw);
 
-            if (seg.length > this.TRACE_MAX_POINTS) seg.shift();
+          if (d > this.MAX_JUMP_METERS) {
+            this.activeSegments.push([llRaw]);
+            this.activeLineIdsMain.push('');
+            this.activeLineIdsOutline.push('');
+            this.lastDrawPoint = llRaw;
+          } else {
+            const minDist = this.dynamicTraceMinMeters(spKmh, accM);
+            if (d >= minDist) {
+              this.lastDrawPoint = llRaw;
+              seg.push(llRaw);
 
-            void this.upsertTrackPolylineThrottled(spKmh, accuracy ?? null);
-            void this.maybeSnapRoads(ll);
+              if (seg.length > this.TRACE_MAX_POINTS) seg.shift();
+
+              void this.upsertTrackPolylineThrottled(spKmh, accM);
+              void this.maybeSnapRoads(llRaw, spKmh, accM);
+            }
           }
         }
       }
     }
 
-    void this.followCamera(ll, { spKmh, prev: this.lastCenter }).catch(() => {});
-    this.lastCenter = ll;
+    // Cámara (SMOOTH)
+    void this.followCamera(llSmooth, { spKmh, prev: this.lastCenter }).catch(() => {});
+    this.lastCenter = llSmooth;
+  }
+
+  private shouldAcceptForTrace(spKmh: number, accM: number | null): boolean {
+    if (accM == null) return true;
+
+    // precisión demasiado mala: no dibujar
+    if (accM > 80) return false;
+
+    // drift típico cuando estás casi parado
+    if (spKmh < 2 && accM > 25) return false;
+
+    // lento + mala precisión = zigzag raro
+    if (spKmh < 6 && accM > 45) return false;
+
+    return true;
   }
 
   private dynamicTraceMinMeters(spKmh: number, acc: number | null): number {
@@ -1061,35 +1099,61 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       const { path, epsM } = this.preparePathForDraw(seg, spKmh, acc);
       if (path.length < 2) return;
 
+      const anyMap = this.map as any;
+
       const existingMain = this.activeLineIdsMain[segIndex];
       const existingOutline = this.activeLineIdsOutline[segIndex];
+
+      // ✅ 1) Si existe updatePolyline, úsalo (cero flicker, menos lag)
+      if (
+        typeof anyMap.updatePolyline === 'function' &&
+        existingMain &&
+        existingOutline
+      ) {
+        try {
+          await anyMap.updatePolyline({ id: existingOutline, path });
+          await anyMap.updatePolyline({ id: existingMain, path });
+
+          if (this.DEBUG) {
+            this.log('poly update seg=', segIndex, 'pts=', seg.length, 'drawPts=', path.length, 'epsM=', epsM.toFixed(2));
+          }
+          return;
+        } catch (e) {
+          // cae a remove+add si update falla
+          this.warn('updatePolyline failed -> fallback remove+add', e);
+        }
+      }
+
+      // ✅ 2) Fallback: remove + add
       const rm: string[] = [];
       if (existingMain) rm.push(existingMain);
       if (existingOutline) rm.push(existingOutline);
       if (rm.length) {
-        try { await (this.map as any).removePolylines(rm); } catch {}
+        try { await anyMap.removePolylines(rm); } catch {}
       }
 
-      const idsOutline = await (this.map as any).addPolylines([{
+      const idsOutline = await anyMap.addPolylines([{
         path,
         strokeColor: this.TRACE_COLOR_OUTLINE,
         strokeWidth: this.TRACE_WIDTH_OUTLINE,
-        geodesic: false, // ✅
+        geodesic: false,
         zIndex: 1,
       }]);
 
-      const idsMain = await (this.map as any).addPolylines([{
+      const idsMain = await anyMap.addPolylines([{
         path,
         strokeColor: this.TRACE_COLOR_MAIN,
         strokeWidth: this.TRACE_WIDTH_MAIN,
-        geodesic: false, // ✅
+        geodesic: false,
         zIndex: 2,
       }]);
 
       this.activeLineIdsOutline[segIndex] = idsOutline?.[0] ?? '';
       this.activeLineIdsMain[segIndex] = idsMain?.[0] ?? '';
 
-      if (this.DEBUG) this.log('poly upsert seg=', segIndex, 'pts=', seg.length, 'drawPts=', path.length, 'epsM=', epsM.toFixed(2));
+      if (this.DEBUG) {
+        this.log('poly upsert seg=', segIndex, 'pts=', seg.length, 'drawPts=', path.length, 'epsM=', epsM.toFixed(2));
+      }
     } finally {
       this.polyBusy = false;
     }
@@ -1098,12 +1162,17 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   // ============================================================
   // SNAP ROADS ✅ URL ABSOLUTA EN ANDROID
   // ============================================================
-  private async maybeSnapRoads(curr: LonLat) {
+  private async maybeSnapRoads(curr: LonLat, spKmh: number, accM: number | null) {
     if (!this.ensureMapReady()) return;
     if (this.snapBusy) return;
 
+    // ✅ No snap si estás lento o accuracy mala
+    // (reduce “snap a calle paralela” y “por edificios”)
+    if (spKmh < 5) return;
+    if (accM != null && accM > 35) return;
+
     const tail = this.getTailPoints(this.SNAP_TAIL_POINTS);
-    if (tail.length < 8) return;
+    if (tail.length < 10) return;
 
     const now = Date.now();
     if (now - this.lastSnapAtMs < this.SNAP_MIN_SECONDS * 1000) return;
@@ -1141,11 +1210,29 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       if (snapped.length < 2) return;
 
       const lastIdx = this.activeSegments.length - 1;
-      this.activeSegments[lastIdx] = snapped;
-      this.lastDrawPoint = snapped[snapped.length - 1] ?? curr;
+      const seg = this.activeSegments[lastIdx];
+      if (!seg || seg.length < 2) return;
+
+      const K = Math.min(this.SNAP_TAIL_POINTS, seg.length);
+      const startIdx = Math.max(0, seg.length - K);
+
+      // ✅ bisagra para continuidad (evita quiebres)
+      const hinge = (startIdx - 1 >= 0) ? seg[startIdx - 1] : null;
+      const snapped2 = (hinge && this.distMeters(hinge, snapped[0]) < 12)
+        ? [hinge, ...snapped]
+        : snapped;
+
+      seg.splice(startIdx, K, ...snapped2);
+
+      this.lastDrawPoint = seg[seg.length - 1] ?? curr;
 
       await this.upsertTrackPolyline(this.speedKmh(), null);
-      this.snapAnchor = snapped[snapped.length - 1] ?? curr;
+
+      this.snapAnchor = seg[seg.length - 1] ?? curr;
+
+      if (this.DEBUG) {
+        this.log('snap merged tail:', { segPts: seg.length, snappedPts: snapped.length, replaced: K });
+      }
     } catch (e) {
       this.warn('snap failed:', e);
     } finally {
@@ -1570,21 +1657,34 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     return out;
   }
 
-  private perpDistanceMeters(p: LonLat, a: LonLat, b: LonLat): number {
-    const ax = a[0], ay = a[1];
-    const bx = b[0], by = b[1];
-    const px = p[0], py = p[1];
+  private projectXYm(p: LonLat, lat0Deg: number): { x: number; y: number } {
+    const R = 6371000;
+    const lat0 = lat0Deg * Math.PI / 180;
+    const x = (p[0] * Math.PI / 180) * R * Math.cos(lat0);
+    const y = (p[1] * Math.PI / 180) * R;
+    return { x, y };
+  }
 
-    const dx = bx - ax;
-    const dy = by - ay;
+  private perpDistanceMeters(p: LonLat, a: LonLat, b: LonLat): number {
+    const lat0 = (a[1] + b[1] + p[1]) / 3;
+
+    const A = this.projectXYm(a, lat0);
+    const B = this.projectXYm(b, lat0);
+    const P = this.projectXYm(p, lat0);
+
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
     const len2 = dx * dx + dy * dy;
 
-    if (len2 === 0) return this.distMeters(a, p);
+    if (len2 == 0) return Math.hypot(P.x - A.x, P.y - A.y);
 
-    const t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    const t = ((P.x - A.x) * dx + (P.y - A.y) * dy) / len2;
     const tt = Math.max(0, Math.min(1, t));
-    const proj: LonLat = [ax + tt * dx, ay + tt * dy];
-    return this.distMeters(proj, p);
+
+    const projX = A.x + tt * dx;
+    const projY = A.y + tt * dy;
+
+    return Math.hypot(P.x - projX, P.y - projY);
   }
 
   // ============================================================
