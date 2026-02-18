@@ -43,6 +43,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import { CapgoCompass } from '@capgo/capacitor-compass';
 
 import { TrackService } from '../../core/services/track.service';
+import { ActivitiesApi, PointIn } from '../../core/services/activities.api';
 import { FinishConfirmModal } from './finish-confirm.modal';
 import { environment } from '../../../environments/environment';
 
@@ -74,6 +75,20 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   state = this.trk.stateSig;
   distanceKm = this.trk.distanceKmSig;
   speedKmh = this.trk.speedKmhSig;
+
+  // =========================
+  // save / activities
+  // =========================
+
+  private activitiesApi = inject(ActivitiesApi);
+  private activityId: number | null = null;
+
+  private backendBuffer: PointIn[] = [];
+  private readonly BACKEND_BATCH_SIZE = 20;
+  private readonly BACKEND_BATCH_INTERVAL_MS = 4000;
+  private lastBackendFlushAt = 0;
+
+  private backendBusy = false;
 
   // =========================
   // DEBUG / LOGS
@@ -229,6 +244,22 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
   private readonly SNAP_MIN_SECONDS = 3;
   private readonly SNAP_TAIL_POINTS = 110;
 
+// =========================
+// UI SNAP (nearest road) solo para PIN/CÁMARA
+// =========================
+  private uiSnappedLL: LonLat | null = null;
+  private uiSnapBusy = false;
+  private uiLastSnapAt = 0;
+
+  private readonly UI_SNAP_MIN_INTERVAL_MS = 2500;
+  private readonly UI_SNAP_ACC_MIN_M = 18;      // desde aquí consideramos "malo"
+  private readonly UI_SNAP_SLOW_KMH = 3.0;      // quieto/lento
+  private readonly UI_SNAP_MAX_DIST_M = 60;     // si la calle más cercana está más lejos, no usamos
+  private readonly UI_UNSNAP_ACC_OK_M = 12;     // cuando mejora, soltamos snap
+  private uiAccOkStreak = 0;
+  private readonly UI_UNSNAP_STREAK = 4;        // 4 fixes seguidos buenos = “saliste”
+  private uiReqId = 0; // ✅ anti-race para nearest()
+
   // =========================
   // MAP STYLE
   // =========================
@@ -347,11 +378,29 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     // ✅ restore si venimos desde cache
     try { this.trk.restoreIfAny(); } catch {}
 
-    // ✅ Si NO hay actividad, la iniciamos
-    try {
-      if (this.trk.stateSig() === 'idle') await this.trk.start();
-    } catch (e) {
-      this.warn('trk.start error:', e);
+    // ✅ Si NO hay actividad local, la iniciamos
+    const wasIdle = this.trk.stateSig() === 'idle';
+    if (wasIdle) {
+      try {
+        await this.trk.start();
+      } catch (e) {
+        this.warn('trk.start error:', e);
+      }
+
+      // ✅ BACKEND start -> crea activities + 1er segment
+      try {
+        const started = await this.activitiesApi.start();
+        if (started?.id) {
+          this.activityId = started.id;
+          this.backendBuffer = [];
+          this.lastBackendFlushAt = Date.now();
+          this.log('ACTIVITY STARTED (backend) id=', this.activityId);
+        } else {
+          this.warn('activitiesApi.start returned null (no token o no apiUrl)');
+        }
+      } catch (e) {
+        this.warn('activitiesApi.start error:', e);
+      }
     }
 
     document.body.classList.add('gm-native-page');
@@ -359,7 +408,6 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
 
     // ✅ NO hard reset si ya existe un recorrido activo
     const hasActive = this.trk.stateSig() !== 'idle';
-
     await this.cleanupAll(!hasActive);
     await this.waitForLayout();
 
@@ -370,7 +418,7 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // ✅ CLAVE: usa lastFix precargado por pantalla anterior
+    // ✅ CLAVE: usa lastFix precargado por pantalla anterior (si existe)
     let ll: LonLat = this.lastCenter ?? [-70.6693, -33.4489];
 
     const fix = (this.trk as any).getFreshLastFix?.(25_000);
@@ -380,19 +428,13 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     } else {
       try {
         Geolocation.getCurrentPosition(this.GEO_HIGH).catch(() => null); // warm-up
-
         const p = await Geolocation.getCurrentPosition(this.GEO_HIGH);
         ll = [p.coords.longitude, p.coords.latitude];
-        this.log('getCurrentPosition(highAcc) ok:', p.coords);
-      } catch (e) {
-        this.warn('getCurrentPosition(highAcc) failed:', e);
+      } catch {
         try {
           const p2 = await Geolocation.getCurrentPosition(this.GEO_LOW);
           ll = [p2.coords.longitude, p2.coords.latitude];
-          this.log('getCurrentPosition(lowAcc) ok:', p2.coords);
-        } catch (e2) {
-          this.warn('getCurrentPosition(lowAcc) failed:', e2);
-        }
+        } catch {}
       }
     }
 
@@ -408,10 +450,9 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     await this.applyMapPadding();
 
     this.attachUserInteractionHandlers();
-
     await this.setNativeLocationDot(this.USE_NATIVE_LOCATION_DOT);
 
-    // ✅ crear marker inicial SOLO requiere mapReady
+    // ✅ marker inicial SOLO requiere mapReady
     if (!this.USE_NATIVE_LOCATION_DOT) {
       await this.ensureUserMarker(ll, 0);
     }
@@ -477,7 +518,6 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
         await anyMap.setPadding(pad);
         this.log('map padding applied', pad);
       } else {
-        // No rompe nada: solo informa
         this.warn('setPadding not available in this plugin version. (Opcional) actualiza @capacitor/google-maps');
       }
     } catch (e) {
@@ -905,7 +945,9 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     const accM = (typeof accuracy === 'number' ? accuracy : null);
     if ((accM ?? 9999) > this.IGNORE_ACC) return;
 
-    // RAW para dibujo / snap
+    const ts = pos.timestamp || Date.now();
+
+    // RAW para dibujo / snap / backend
     const llRaw: LonLat = [longitude, latitude];
 
     // Smooth solo para UI (marker/cámara)
@@ -917,26 +959,50 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     const llSmooth = this.ema(alpha, latitude, longitude);
     const spKmh = (speed ?? 0) * 3.6;
 
-    // Heading
+    // ============================================================
+    // ✅ UI SNAP (INDOOR): pin/cámara a la calle más cercana
+    // ============================================================
+    const doUiSnap = this.shouldUiSnap(spKmh, accM);
+
+    // si el GPS volvió a estar bueno (y además vas moviéndote), suelta snapped
+    this.updateUiUnsnap(accM, spKmh);
+
+    // si estamos "indoor" -> pedir nearest road (NO await, no bloquea)
+    if (doUiSnap) {
+      void this.maybeSnapUiNearest(llSmooth);
+    }
+
+    // coord final para UI (marker/cámara)
+    const llUi: LonLat = (doUiSnap && this.uiSnappedLL) ? this.uiSnappedLL : llSmooth;
+
+    // ============================================================
+    // HEADING  ✅ bearing estable usando llUi (no llSmooth)
+    // ============================================================
     this.manageCompassAdaptive(spKmh);
-    const moveBear = this.computeMoveBearingStable(llSmooth);
+
+    const moveBear = this.computeMoveBearingStable(llUi);
+
     this.headingDeg = this.fusedHeading({
       gpsHeading: typeof heading === 'number' ? heading : null,
       moveBearing: moveBear,
       spKmh,
     });
 
-    // Marker (SMOOTH)
+    // ============================================================
+    // MARKER (UI)
+    // ============================================================
     if (!this.USE_NATIVE_LOCATION_DOT) {
-      void this.ensureUserMarker(llSmooth, this.headingDeg).catch(() => {});
+      void this.ensureUserMarker(llUi, this.headingDeg).catch(() => {});
     }
 
+    // ============================================================
     // TrackService (RAW)
+    // ============================================================
     if (this.state() === 'recording') {
       this.trk.onPosition(
         latitude,
         longitude,
-        pos.timestamp || Date.now(),
+        ts,
         (typeof speed === 'number' ? speed : undefined),
         (typeof accuracy === 'number' ? accuracy : undefined),
       );
@@ -945,7 +1011,25 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       else if (typeof speed === 'number') this.trk.speedKmhSig.set(Math.max(0, speed * 3.6));
     }
 
+    // ============================================================
+    // ✅ BACKEND: guarda puntos SOLO si estamos grabando y existe activityId
+    // ============================================================
+    if (this.state() === 'recording' && this.activityId) {
+      this.backendBuffer.push({
+        ts: Math.floor(ts),
+        lat: latitude,
+        lng: longitude,
+        accuracy_m: accM ?? undefined,
+        speed_mps: typeof speed === 'number' ? speed : undefined,
+      });
+
+      // flush por tamaño/tiempo (no bloqueante)
+      void this.flushBackendBuffer(false);
+    }
+
+    // ============================================================
     // Polyline (RAW + gate anti-drift)
+    // ============================================================
     if (this.state() === 'recording') {
       if (this.shouldAcceptForTrace(spKmh, accM)) {
         const segIndex = this.activeSegments.length - 1;
@@ -978,9 +1062,11 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       }
     }
 
-    // Cámara (SMOOTH)
-    void this.followCamera(llSmooth, { spKmh, prev: this.lastCenter }).catch(() => {});
-    this.lastCenter = llSmooth;
+    // ============================================================
+    // CÁMARA (UI) ✅ usa llUi, no llSmooth
+    // ============================================================
+    void this.followCamera(llUi, { spKmh, prev: this.lastCenter }).catch(() => {});
+    this.lastCenter = llUi;
   }
 
   private shouldAcceptForTrace(spKmh: number, accM: number | null): boolean {
@@ -1344,8 +1430,6 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     if (now - this.lastCamAt < interval) return;
     this.lastCamAt = now;
 
-    await this.applyMapPadding();
-
     const targetBearing = this.normalizeDeg(this.lastBearing);
     this.camBearing = this.smoothAngle(this.camBearing, targetBearing, 0.18);
 
@@ -1595,20 +1679,88 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
     }
   }
 
-  private closeAndFinalize(save: boolean) {
-    this.trackingActive = false;
+  private async flushBackendBuffer(force = false) {
+    if (!this.activityId) return;
+    if (!this.backendBuffer.length) return;
 
+    const now = Date.now();
+    if (!force) {
+      if (this.backendBuffer.length < this.BACKEND_BATCH_SIZE) {
+        if (now - this.lastBackendFlushAt < this.BACKEND_BATCH_INTERVAL_MS) return;
+      }
+    }
+
+    if (this.backendBusy) return;
+    this.backendBusy = true;
+
+    const batch = this.backendBuffer.splice(0, this.backendBuffer.length);
+    this.lastBackendFlushAt = now;
+
+    try {
+      await this.activitiesApi.pushPoints(this.activityId, batch);
+      this.log('BACKEND pushPoints ok:', { n: batch.length });
+    } catch (e) {
+      // si falla, reinsertamos para no perder
+      this.backendBuffer.unshift(...batch);
+      this.warn('BACKEND pushPoints failed (buffer restored):', e);
+    } finally {
+      this.backendBusy = false;
+    }
+  }
+
+  private async closeAndFinalize(save: boolean) {
+    // stop loops primero (UI)
+    this.trackingActive = false;
     this.stopHeartbeat();
 
     if (this.watchId) {
-      try { Geolocation.clearWatch({ id: this.watchId }); } catch {}
+      try { await Geolocation.clearWatch({ id: this.watchId }); } catch {}
       this.watchId = undefined;
     }
 
-    const { saved } = this.trk.finalize(save);
-    if (save && saved) void this.toastMsg('Actividad guardada');
+    // ✅ resumen antes de finalizar (para evitar los errores TS)
+    const summary = this.trk.getSummary(); // { durationMs, distanceKm, avgSpeedKmh }
 
-    void this.cleanupAll(true);
+    // ✅ cierra estado local
+    const { saved } = this.trk.finalize(save);
+
+    // ✅ si hay backend activity, flush final y finish
+    if (this.activityId) {
+      try {
+        // flush final de puntos pendientes
+        await this.flushBackendBuffer(true);
+
+        // finish activity (state finished/discarded)
+        await this.activitiesApi.finish(this.activityId, {
+          elapsed_ms: Math.max(0, Math.floor(summary.durationMs)),
+          distance_m: Math.max(0, summary.distanceKm * 1000),
+          avg_speed_kmh: Math.max(0, summary.avgSpeedKmh),
+          save: !!save,
+        });
+
+        // (opcional) mapmatch al final si guardaste
+        // if (save) { try { await this.activitiesApi.mapmatch(this.activityId, true); } catch {} }
+
+        this.log('BACKEND finish ok:', { id: this.activityId, save });
+      } catch (e) {
+        this.warn('BACKEND finish failed:', e);
+      } finally {
+        this.activityId = null;
+        this.backendBuffer = [];
+        this.lastBackendFlushAt = 0;
+      }
+    }
+
+    if (save && saved) {
+      void this.toastMsg('Actividad guardada');
+    } else if (!save) {
+      void this.toastMsg('Actividad descartada');
+    }
+
+    // limpia mapa/handlers
+    await this.cleanupAll(true);
+
+    // vuelve
     this.router.navigateByUrl('/tabs/registrar');
   }
 
@@ -1734,5 +1886,94 @@ export class RegistrarActivoPage implements AfterViewInit, OnDestroy {
       Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
 
     return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  private shouldUiSnap(spKmh: number, accM: number | null): boolean {
+    if (accM == null) return false;
+
+    // ✅ histéresis: si ya estás snapped, mantenlo hasta que unsnap diga lo contrario
+    if (this.uiSnappedLL) return true;
+
+    if (spKmh <= this.UI_SNAP_SLOW_KMH && accM >= this.UI_SNAP_ACC_MIN_M) return true;
+
+    // indoor típico aunque estés casi quieto
+    if (spKmh < 1.5 && accM >= 25) return true;
+
+    return false;
+  }
+
+
+  private updateUiUnsnap(accM: number | null, spKmh: number) {
+    // ✅ soltamos snapped solo si:
+    // - accuracy mejora varias veces seguidas
+    // - y además NO estás casi quieto (para evitar “parpadeo” indoor)
+    const goodAcc = (accM != null && accM <= this.UI_UNSNAP_ACC_OK_M);
+    const movingEnough = spKmh > 2.0;
+
+    if (goodAcc && movingEnough) {
+      this.uiAccOkStreak++;
+      if (this.uiAccOkStreak >= this.UI_UNSNAP_STREAK) {
+        this.uiSnappedLL = null;
+        this.uiAccOkStreak = 0;
+      }
+    } else {
+      this.uiAccOkStreak = 0;
+    }
+  }
+
+  private async maybeSnapUiNearest(ll: LonLat) {
+    if (this.uiSnapBusy) return;
+
+    const now = Date.now();
+    if (now - this.uiLastSnapAt < this.UI_SNAP_MIN_INTERVAL_MS) return;
+    this.uiLastSnapAt = now;
+
+    const url = this.buildApiUrl('roads/nearest');
+    if (Capacitor.isNativePlatform() && !url) return;
+
+    // ✅ anti-race: si llega respuesta vieja, se descarta
+    const rid = ++this.uiReqId;
+
+    this.uiSnapBusy = true;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: ll[1], lng: ll[0] }),
+      });
+
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+
+      // ✅ descarta si llegó tarde
+      if (rid !== this.uiReqId) return;
+
+      const lat = Number(data?.lat);
+      const lng = Number(data?.lng);
+      const dist = Number(data?.dist_m);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(dist)) return;
+      if (dist > this.UI_SNAP_MAX_DIST_M) return;
+
+      const snapped: LonLat = [lng, lat];
+
+      // ✅ histeresis: evita saltar entre calles
+      if (this.uiSnappedLL) {
+        const jump = this.distMeters(this.uiSnappedLL, snapped);
+        if (jump < 18) {
+          // pequeño ajuste permitido
+          this.uiSnappedLL = snapped;
+        } else {
+          // salto grande: mantenemos el anterior
+        }
+      } else {
+        this.uiSnappedLL = snapped;
+      }
+    } catch (e) {
+      this.warn('UI nearest snap failed:', e);
+    } finally {
+      this.uiSnapBusy = false;
+    }
   }
 }
